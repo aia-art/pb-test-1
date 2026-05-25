@@ -1,0 +1,28 @@
+[
+  {
+    "id": "vote_sd15_destroy",
+    "cardId": "M-004",
+    "question": "SD 1.5 — How should the auto-destroy mechanic work?",
+    "optionA": {
+      "label": "Current (v0.14)",
+      "description": "Creations enter with 1 extra Glitch token regardless. If Quality reaches 0 on entry, destroyed immediately. Requires a Quality-boosting Prompt to survive."
+    },
+    "optionB": {
+      "label": "Alternative",
+      "description": "Creations always survive entry but start with Quality 1 and 2 Glitch tokens. Automatically destroyed at the start of your next turn unless you spend 1 Credit to stabilise them."
+    }
+  },
+  {
+    "id": "vote_cliplock_apply",
+    "cardId": "C-001",
+    "question": "Aia — CLIP-LOCK Mastery: once per turn or unlimited?",
+    "optionA": {
+      "label": "Once Per Turn (v0.14)",
+      "description": "Once per turn during your Main Phase, you may apply CLIP-LOCK to one Coherent Creation. Forces strategic timing."
+    },
+    "optionB": {
+      "label": "Unlimited (1 Rep each)",
+      "description": "You may apply CLIP-LOCK to any number of Coherent Creations during your Main Phase. Each application costs 1 Reputation."
+    }
+  }
+]

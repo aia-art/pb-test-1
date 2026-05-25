@@ -1,0 +1,6 @@
+{
+  "name": "Prompt Battle",
+  "description": "An ethereal dark-themed AI trading card game (TCG) where creators use models and prompts to generate creations that compete for visibility and reputation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
