@@ -20,7 +20,7 @@ export const FORMS = {
   VOTE:           '1FAIpQLSd_jzQ5tj0_732HaEmdUswDrLnycPODK7VdMTlSZ0XWf5ZnQw',
   DECK_SHARE:     '1FAIpQLSc7B0mNiZLXz8TMenlmgRJUBom-IiXiBEW_WNCQS6K5Kp1OFQ',
   GAME_DATA:      '1FAIpQLSdY66PR5uZDtF5wQPcjH_iBhfBs0iTEBDbJROx99EDcXRymdA',
-  SUGGEST_ARTIST: 'YOUR_FORM_ID_5',  // ← create this form and paste ID here
+  SUGGEST_ARTIST: '1FAIpQLSfap7_bhmM_tJKJXfkYvC_Zy-APhIPhDLaePuQcZg2K_iCEJA',  // ← create this form and paste ID here
 } as const;
 
 // ── Google Forms field entry IDs ─────────────────────────────
@@ -54,12 +54,12 @@ export const FIELDS = {
     reason:   'entry.862861704',
   },
   SUGGEST_ARTIST: {
-    nc_tag:    'entry.5001',
-    faction:   'entry.5002',
-    abilities: 'entry.5003',
-    prompts:   'entry.5004',
-    reason:    'entry.5005',
-    submitter: 'entry.5006',
+    nc_tag:    'entry.1912910786',
+    faction:   'entry.987337233',
+    abilities: 'entry.588699424',
+    prompts:   'entry.692347102',
+    reason:    'entry.485841808',
+    submitter: 'entry.687526102',
   },
 } as const;
 
