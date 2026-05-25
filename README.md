@@ -70,4 +70,4 @@ public/
 
 ---
 
-*Prompt Battle · First Render (Set 001) · Rules v0.14 · By @aia*
+*Prompt Battle · First Render (Set 001) · Rules v0.14 · By @aia :)*
