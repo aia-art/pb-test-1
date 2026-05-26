@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, Save, X, ChevronLeft, Copy, ExternalLink } from 'lucide-react';
+import { Plus, Save, X, ChevronLeft, Copy } from 'lucide-react';
+import { MOOD_GRAD } from './CardGallery';
 import { ALL_CARDS, PREBUILT_DECKS, DECK_BUILD_RULES, getCardById } from '../data';
-import type { Card, CustomDeck, DecksStore } from '../types';
+import type { Card, CustomDeck, DecksStore, PrebuiltDeck } from '../types';
 import { submitToGoogleForm, getHandle, setHandle } from '../utils/forms';
 import { FORMS, FIELDS } from '../config';
 
@@ -49,20 +50,6 @@ function DeckSlot({ card, count, onRemove, fixed = false }: { card: Card; count:
 }
 
 // ── Mini card for editor grid ─────────────────────────────────
-const MOOD_GRAD: Record<string, string> = {
-  iridescent:'from-purple-900/40 to-teal-900/30', chaotic:'from-red-900/30 to-purple-900/20',
-  precise:'from-blue-900/30 to-teal-900/20', bold:'from-orange-900/30 to-amber-900/20',
-  neutral:'from-slate-800/60 to-slate-900/40', grainy:'from-stone-800/50 to-stone-900/40',
-  epic:'from-amber-900/40 to-yellow-900/20', generic:'from-rose-900/30 to-pink-900/20',
-  layered:'from-green-900/30 to-teal-900/20', guilty:'from-amber-900/30 to-stone-900/30',
-  intense:'from-orange-900/40 to-red-900/20', absurd:'from-green-900/30 to-emerald-900/20',
-  ironic:'from-indigo-900/30 to-purple-900/20', pastoral:'from-green-900/40 to-lime-900/20',
-  surreal:'from-violet-900/40 to-rose-900/20', isolated:'from-blue-900/30 to-slate-900/30',
-  warm:'from-amber-900/30 to-orange-900/20', celebratory:'from-yellow-800/50 to-amber-700/30',
-  catastrophic:'from-red-900/50 to-orange-900/30', premium:'from-yellow-700/30 to-amber-800/30',
-  spotlight:'from-yellow-800/40 to-amber-900/30', urgent:'from-blue-900/40 to-slate-900/30',
-  competitive:'from-stone-800/30 to-amber-900/20',
-};
 
 function EditorCard({ card, deck, onAdjust }: { card: Card; deck: CustomDeck | null; onAdjust: (id: string, delta: number) => void }) {
   if (!deck) return null;
@@ -192,7 +179,7 @@ export default function DeckBuilder() {
     setView('editor');
   }
 
-  function duplicate(src: CustomDeck | ReturnType<typeof PREBUILT_DECKS[number]>) {
+  function duplicate(src: CustomDeck | PrebuiltDeck) {
     const d: CustomDeck = { ...JSON.parse(JSON.stringify(src)), id: `deck_${Date.now()}`, name: src.name + ' (Copy)', createdAt: new Date().toISOString(), description: (src as any).description || '' };
     const s = { ...store, decks: [...store.decks, d] };
     persist(s);
