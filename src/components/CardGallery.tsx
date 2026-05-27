@@ -321,7 +321,7 @@ function VotesView() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/data/votes.json')
+    fetch(import.meta.env.BASE_URL + 'data/votes.json')
       .then(r => r.json())
       .then((data: VoteQuestion[]) => { setVotes(data); setLoading(false); })
       .catch(() => setLoading(false));

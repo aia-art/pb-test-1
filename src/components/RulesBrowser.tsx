@@ -80,7 +80,7 @@ export default function RulesBrowser() {
             document.head.appendChild(s);
           });
         }
-        const r = await fetch(`/docs/${DOC_MAP[key]}`);
+        const r = await fetch(import.meta.env.BASE_URL + `docs/${DOC_MAP[key]}`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const md = await r.text();
         docCache[key] = linkTerms((window as any).marked.parse(md));

@@ -1,10 +1,18 @@
-import { defineConfig } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-
-// Change 'prompt-battle' to match your GitHub repo name
-const BASE = process.env.GITHUB_ACTIONS ? '/pb-test-1/' : '/';
+import path from 'path';
+import { defineConfig } from 'vite';
 
 export default defineConfig({
-  plugins: [react()],
-  base: BASE,
+  plugins: [react(), tailwindcss()],
+  base: './',   // relative paths — works for any repo name on GitHub Pages
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, '.'),
+    },
+  },
+  server: {
+    hmr: process.env.DISABLE_HMR !== 'true',
+    watch: process.env.DISABLE_HMR === 'true' ? null : {},
+  },
 });

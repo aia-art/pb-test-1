@@ -1,5 +1,5 @@
 # DOCUMENT 5: QUICK REFERENCE SHEET
-## NightCafe: The Card Game — First Render
+## Prompt Battle — First Render
 ### Keep this on the table during play
 
 ---

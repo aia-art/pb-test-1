@@ -4,9 +4,9 @@
 
 *Hello, and thank you.*
 
-*You are holding one of the very first copies of NightCafe: The Card Game to exist anywhere in the world. You are not just a player — you are part of building something from the ground up.*
+*You are holding one of the very first copies of Prompt Battle to exist anywhere in the world. You are not just a player — you are part of building something from the ground up.*
 
-*This is Set 001 — First Render. The first set of NightCafe: The Card Game. Two starter decks, forty cards each, one complete experience.*
+*This is Set 001 — First Render. The first set of Prompt Battle. Two starter decks, forty cards each, one complete experience.*
 
 *The game is inspired by the NightCafe Creator community — the people who have spent years making art, running challenges, building friendships, and making the platform what it is.*
 
@@ -56,6 +56,6 @@ See Document 7 for specific flagged items.
 
 ---
 
-*NightCafe: The Card Game — First Render (Set 001)*
+*Prompt Battle — First Render (Set 001)*
 *Quick Duel Edition · Beta Release · Rules v0.14*
 *Illustration by @aia*

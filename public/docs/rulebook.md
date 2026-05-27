@@ -1,5 +1,5 @@
 # DOCUMENT 2: QUICK DUEL RULEBOOK
-## NightCafe: The Card Game — First Render Edition
+## Prompt Battle — First Render Edition
 ### Complete Rules for 1v1 Play
 
 ---
@@ -8,7 +8,7 @@
 
 This rulebook covers everything you need to play a complete Quick Duel game using the First Render starter decks. Quick Duel is a two-player format. Each player fields one Creator card and a 40-card deck. The game ends when one player's Creator is eliminated.
 
-**First Render** is the name of Set 001 — the first set of NightCafe: The Card Game. It contains the Aia — CLIP Starter Deck and the Anonymous User — Horde Starter Deck, along with all the cards in both decks.
+**First Render** is the name of Set 001 — the first set of Prompt Battle. It contains the Aia — CLIP Starter Deck and the Anonymous User — Horde Starter Deck, along with all the cards in both decks.
 
 ---
 

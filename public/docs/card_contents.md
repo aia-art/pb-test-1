@@ -1824,7 +1824,7 @@ Events (12):
 
 \---
 
-\*NightCafe: The Card Game — First Render (Set 001)\*  
+\*Prompt Battle — First Render (Set 001)\*  
 \*Complete Card Reference — v0.14\*  
 \*Illustration by @aia\*
 

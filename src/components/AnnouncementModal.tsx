@@ -5,12 +5,12 @@ import type { Announcement, AnnouncementIndex } from '../types';
 // Tries to load from /announcements/. Works on GitHub Pages + local server.
 async function fetchAnnouncements(): Promise<Announcement | null> {
   try {
-    const idxRes  = await fetch('/announcements/index.json');
+    const idxRes  = await fetch(import.meta.env.BASE_URL + 'announcements/index.json');
     if (!idxRes.ok) return null;
     const list: AnnouncementIndex[] = await idxRes.json();
     if (!list.length) return null;
     const latest  = list[list.length - 1];
-    const annRes  = await fetch(`/announcements/${latest.id}.json`);
+    const annRes  = await fetch(import.meta.env.BASE_URL + `announcements/${latest.id}.json`);
     if (!annRes.ok) return null;
     return await annRes.json();
   } catch { return null; }

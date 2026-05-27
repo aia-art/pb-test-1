@@ -3,13 +3,13 @@
 
 ---
 
-*This tutorial teaches you everything you need to play NightCafe: The Card Game from scratch. No experience with card games needed. By the end you will know how to take a full turn, generate Creations, build Visibility, earn Reputation, use abilities, and fight to eliminate your opponent's Creator. Grab the Horde Starter Deck and a friend. Let's go.*
+*This tutorial teaches you everything you need to play Prompt Battle from scratch. No experience with card games needed. By the end you will know how to take a full turn, generate Creations, build Visibility, earn Reputation, use abilities, and fight to eliminate your opponent's Creator. Grab the Horde Starter Deck and a friend. Let's go.*
 
 ---
 
 ## WHAT IS THIS GAME?
 
-NightCafe: The Card Game is based on NightCafe Creator, an AI art platform where people generate images using AI models and prompts. In this game you play as an AI art Creator, spending Credits to generate Creations, building their Visibility, earning Reputation, and using your Creator's abilities to outmanoeuvre your opponent.
+Prompt Battle is based on NightCafe Creator, an AI art platform where people generate images using AI models and prompts. In this game you play as an AI art Creator, spending Credits to generate Creations, building their Visibility, earning Reputation, and using your Creator's abilities to outmanoeuvre your opponent.
 
 You win by reducing your opponent's Creator's Loyalty to 0.
 
@@ -35,7 +35,7 @@ If anything is missing, check the insert card for replacement instructions.
 
 ## WHAT IS FIRST RENDER?
 
-First Render is the name of Set 001 — the first set of NightCafe: The Card Game. It contains exactly two starter decks: the Aia — CLIP Starter Deck and the Anonymous User — Horde Starter Deck, along with all the cards in both decks. Everything in this box is part of Set 001: First Render.
+First Render is the name of Set 001 — the first set of Prompt Battle. It contains exactly two starter decks: the Aia — CLIP Starter Deck and the Anonymous User — Horde Starter Deck, along with all the cards in both decks. Everything in this box is part of Set 001: First Render.
 
 ---
 
