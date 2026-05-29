@@ -188,7 +188,7 @@ function CardModal({ card, onClose }: { card: Card; onClose: () => void }) {
               ))}
             </div>
             <p className="text-[10px] italic text-[#c0c8c5]/50 leading-tight">{card.illustration}</p>
-            <p className="text-[9px] font-mono text-[#c0c8c5]/20 mt-2">SET 001 · Prompt Battle</p>
+            <p className="text-[9px] font-mono text-[#c0c8c5]/20 mt-2">SET 001 · Prompt Battle TCG</p>
           </div>
 
           {/* Info panel */}

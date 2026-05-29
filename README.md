@@ -1,4 +1,4 @@
-# Prompt Battle — First Render (Set 001)
+# Prompt Battle TCG — First Render (Set 001)
 ### Beta Web Platform · v0.14
 
 A React + TypeScript + Vite + Tailwind TCG platform for browser-based play.
@@ -70,4 +70,4 @@ public/
 
 ---
 
-*Prompt Battle · First Render (Set 001) · Rules v0.14 · By @aia :)*
+*Prompt Battle TCG · First Render (Set 001) · Rules v0.14 · By @aia :)*

@@ -28,7 +28,7 @@ export default function BetaGate({ onUnlock }: BetaGateProps) {
           <div className="w-16 h-16 rounded-2xl bg-[#a1d0c6]/10 border border-[#a1d0c6]/30 flex items-center justify-center">
             <Award className="w-8 h-8 text-[#a1d0c6]" />
           </div>
-          <h1 className="text-4xl font-bold text-[#dfe3e1] tracking-tight">Prompt Battle</h1>
+          <h1 className="text-4xl font-bold text-[#dfe3e1] tracking-tight">Prompt Battle TCG</h1>
           <p className="text-[#c0c8c5]/60 text-sm font-mono uppercase tracking-widest">
             Set 001 · First Render · Beta Access
           </p>

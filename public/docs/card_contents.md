@@ -1824,7 +1824,7 @@ Events (12):
 
 \---
 
-\*Prompt Battle — First Render (Set 001)\*  
+\*Prompt Battle TCG — First Render (Set 001)\*  
 \*Complete Card Reference — v0.14\*  
 \*Illustration by @aia\*
 

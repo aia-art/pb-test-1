@@ -1,61 +1,53 @@
-# DOCUMENT 8: BETA TESTER MESSAGE
+# A NOTE FROM @AIA
 
 ---
 
-*Hello, and thank you.*
+Hello, and thank you.
 
-*You are holding one of the very first copies of Prompt Battle to exist anywhere in the world. You are not just a player — you are part of building something from the ground up.*
+You are holding one of the very first copies of Prompt Battle TCG to exist anywhere in the world. You are not just a player — you are part of building something from the ground up, and that means a lot.
 
-*This is Set 001 — First Render. The first set of Prompt Battle. Two starter decks, forty cards each, one complete experience.*
-
-*The game is inspired by the NightCafe Creator community — the people who have spent years making art, running challenges, building friendships, and making the platform what it is.*
+This is **Set 001 — First Render**. The first set of Prompt Battle TCG. Two starter decks, fourty cards each, one complete experience. It is rough in places. Things will change. That is the point of a beta.
 
 ---
 
 ## WHAT I NEED FROM YOU
 
-Play it. Tell me what feels wrong. Tell me what feels right. Be honest.
+**Play it.** Tell me what feels wrong. Tell me what feels right. Be honest — diplomatic feedback that avoids saying anything negative is not useful here. I need to know what actually is not working.
 
-Specific focus areas:
-- Reputation economy and the 20-cap
-- SD1.5 destruction mechanic — clever or confusing?
-- CLIP-LOCK manual application — rewarding or tedious?
-- Going Viral — satisfying climax or hard to set up?
-- Aia going first — acceptable tempo loss or genuinely frustrating?
-- Creator Stress — fair pressure or unfair punishment?
-- Draw rate — enough cards each turn?
-- Style Compatibility — clear without being on the cards?
-- Mass Report at 7 Reputation — fair trade-off?
-- Queue limit of 2 — tight enough or too restrictive?
-- One activation per turn — good pacing or too slow?
-- The tutorials — could a complete newcomer follow Tutorial 1A alone?
+A few specific things I am watching closely in this version:
 
-See Document 7 for specific flagged items.
+- **The Reputation economy** — does the 20-cap feel right? Are you hitting it too often? Not often enough?
+- **SD1.5's entry destruction** — is the "you need a Quality boost to keep this alive" mechanic clever, or just confusing?
+- **CLIP-LOCK** — does locking and unlocking Creations feel strategic and rewarding, or tedious?
+- **Going Viral** — is it a satisfying climax to the Horde strategy, or too hard to set up?
+- **Draw rate** — is 1 card per turn enough, or do hands run dry too fast?
 
----
-
-## HOW TO SEND FEEDBACK
-
-*[Insert feedback method here.]*
+The **Flagged Items** document has the full list of specific things to watch for. Worth a read before your first game.
 
 ---
 
 ## A FEW THINGS TO KNOW
 
-- Rules v0.14. Things will change.
-- FAQ and Absolute Rules take priority over card text.
-- Some mechanics on cards (Evolution, Legacy Models, Gallery War) are not available in this set.
-- Palette Counters widget: not yet implemented.
-- Bonus Cards widget: 0, intentional for First Render.
+**Rules v0.14.** Not the final version. Things will change based on what you tell me.
+
+**The FAQ and Absolute Rules take priority over card text** if there is a conflict. Some cards in Set 001 have slightly outdated wording from earlier versions — the FAQ covers the correct interpretations.
+
+**Some mechanics are not in this set.** Evolution, Legacy Models, Gallery War, and several other features are planned for future sets. First Render is intentionally focused — two decks, one complete play experience, nothing overwhelming.
+
+**If something seems broken, it probably is.** Tell me. That is exactly what this is for.
 
 ---
 
-*Thank you for being here at the beginning.*
+## HOW TO SEND FEEDBACK
 
-*— @aia*
+Use the **Feedback** button at any time — it is always there in the bottom corner. For specific design votes (like the SD1.5 mechanic), use the **Cards → Votes** section.
+
+If you have a custom deck idea, the **Decks → Share** option sends it to me directly. Include a note about the strategy — it helps a lot.
+
+I read everything.
 
 ---
 
-*Prompt Battle — First Render (Set 001)*
-*Quick Duel Edition · Beta Release · Rules v0.14*
-*Illustration by @aia*
+Thank you again. Genuinely.
+
+— *@aia · Prompt Battle TCG, First Render (Set 001)*

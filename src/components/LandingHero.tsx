@@ -4,10 +4,10 @@ interface Props { onNavigate: (tab: string) => void; }
 
 export default function LandingHero({ onNavigate }: Props) {
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex flex-col items-center justify-center py-16 space-y-16 animate-fade-in">
+    <div className="min-h-[calc(100vh-4rem)] flex flex-col items-centre justify-centre py-16 space-y-16 animate-fade-in">
 
       {/* Hero */}
-      <div className="text-center space-y-4 max-w-2xl">
+      <div className="text-centre space-y-4 max-w-2xl">
         <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-[#a1d0c6]/60">Set 001 · First Render · Beta v0.14</p>
         <h1 className="text-6xl sm:text-7xl font-black text-[#dfe3e1] tracking-tight leading-none">
           Prompt<span className="text-[#a1d0c6]">Battle</span>
@@ -18,10 +18,10 @@ export default function LandingHero({ onNavigate }: Props) {
       {/* Welcome message */}
       <div className="max-w-xl w-full bg-[#1c2120]/60 backdrop-blur-sm border border-[#a1d0c6]/15 rounded-2xl p-7 space-y-4 shadow-xl shadow-black/30">
         <p className="text-sm text-[#c0c8c5] leading-relaxed italic">
-          Hello, and thank you. You are holding one of the very first copies of Prompt Battle to exist anywhere in the world. You are not just a player — you are part of building something from the ground up.
+          Hello, and thank you. You are holding one of the very first copies of Prompt Battle TCG to exist anywhere in the world. You are not just a player — you are part of building something from the ground up.
         </p>
         <p className="text-sm text-[#c0c8c5] leading-relaxed italic">
-          This is Set 001 — First Render. Two starter decks, forty cards each, one complete experience. Rules v0.14. Things will change.
+          This is Set 001 — First Render. Two starter decks, fourty cards each, one complete experience. Rules v0.14. Things will change.
         </p>
         <div className="pt-2 border-t border-[#dfe3e1]/5">
           <p className="text-[10px] font-bold uppercase tracking-widest text-[#a1d0c6]/50 mb-2">What I need from you</p>
@@ -44,7 +44,7 @@ export default function LandingHero({ onNavigate }: Props) {
       </div>
 
       {/* Nav buttons */}
-      <div className="flex flex-wrap gap-4 justify-center">
+      <div className="flex flex-wrap gap-4 justify-centre">
         <NavBtn icon={<BookOpen className="w-5 h-5" />} label="Start Tutorial" sub="New to the game?" onClick={() => onNavigate('rules')} />
         <NavBtn icon={<Sword className="w-6 h-6" />}    label="Play" sub="Find a game" onClick={() => onNavigate('play')} primary />
         <NavBtn icon={<Library className="w-5 h-5" />}  label="Card Index" sub="42 cards" onClick={() => onNavigate('cards')} />
@@ -52,7 +52,7 @@ export default function LandingHero({ onNavigate }: Props) {
       </div>
 
       <p className="text-[10px] font-mono text-[#c0c8c5]/20 tracking-widest uppercase">
-        Prompt Battle · First Render (Set 001) · Rules v0.14 · Beta
+        Prompt Battle TCG · First Render (Set 001) · Rules v0.14 · Beta
       </p>
     </div>
   );
@@ -61,7 +61,7 @@ export default function LandingHero({ onNavigate }: Props) {
 function NavBtn({ icon, label, sub, onClick, primary = false }: { icon: React.ReactNode; label: string; sub: string; onClick: () => void; primary?: boolean }) {
   return (
     <button onClick={onClick}
-      className={`flex flex-col items-center gap-2 px-7 py-5 min-w-[140px] rounded-2xl border transition-all group active:scale-95 ${
+      className={`flex flex-col items-centre gap-2 px-7 py-5 min-w-[140px] rounded-2xl border transition-all group active:scale-95 ${
         primary
           ? 'bg-[#a1d0c6] text-[#033730] border-[#a1d0c6] shadow-xl shadow-[#a1d0c6]/25 hover:brightness-110'
           : 'bg-[#1c2120]/60 text-[#c0c8c5] border-[#a1d0c6]/15 hover:border-[#a1d0c6]/40 hover:text-[#a1d0c6] hover:bg-[#a1d0c6]/5 shadow-lg'

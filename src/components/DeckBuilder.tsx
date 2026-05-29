@@ -36,7 +36,7 @@ function DeckSlot({ card, count, onRemove, fixed = false }: { card: Card; count:
     artifact:'bg-purple-500/20 text-purple-400', event:'bg-blue-500/20 text-blue-400',
   };
   return (
-    <div className="flex items-center gap-2 py-1.5 border-b border-[#dfe3e1]/5 last:border-0 group">
+    <div className="flex items-centre gap-2 py-1.5 border-b border-[#dfe3e1]/5 last:border-0 group">
       <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${typeColor[card.type] || ''}`}>{card.type[0]}</span>
       <span className="text-xs text-[#c0c8c5] flex-1 leading-tight truncate">{card.name}</span>
       <span className="text-[10px] font-mono text-[#a1d0c6]/70">×{count}</span>
@@ -87,10 +87,10 @@ function EditorCard({ card, deck, onAdjust }: { card: Card; deck: CustomDeck | n
           {!isCreator && !isModel && (
             <>
               <button disabled={count === 0} onClick={() => onAdjust(card.id, -1)}
-                className="w-6 h-6 rounded-lg border border-[#dfe3e1]/10 text-[#c0c8c5] hover:border-[#a1d0c6]/40 hover:text-[#a1d0c6] disabled:opacity-20 disabled:cursor-not-allowed transition-all flex items-center justify-center text-sm">−</button>
-              <span className="flex-1 text-center text-[11px] font-mono text-[#c0c8c5]">{count > 0 ? `×${count}` : ''}</span>
+                className="w-6 h-6 rounded-lg border border-[#dfe3e1]/10 text-[#c0c8c5] hover:border-[#a1d0c6]/40 hover:text-[#a1d0c6] disabled:opacity-20 disabled:cursor-not-allowed transition-all flex items-centre justify-centre text-sm">−</button>
+              <span className="flex-1 text-centre text-[11px] font-mono text-[#c0c8c5]">{count > 0 ? `×${count}` : ''}</span>
               <button disabled={atMax} onClick={() => onAdjust(card.id, 1)}
-                className="w-6 h-6 rounded-lg border border-[#dfe3e1]/10 text-[#c0c8c5] hover:border-[#a1d0c6]/40 hover:text-[#a1d0c6] disabled:opacity-20 disabled:cursor-not-allowed transition-all flex items-center justify-center text-sm">+</button>
+                className="w-6 h-6 rounded-lg border border-[#dfe3e1]/10 text-[#c0c8c5] hover:border-[#a1d0c6]/40 hover:text-[#a1d0c6] disabled:opacity-20 disabled:cursor-not-allowed transition-all flex items-centre justify-centre text-sm">+</button>
             </>
           )}
         </div>
@@ -121,14 +121,14 @@ function ShareModal({ deck, onClose }: { deck: CustomDeck; onClose: () => void }
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-centre justify-centre p-4" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="bg-[#1c2120] border border-[#a1d0c6]/15 rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4">
         <div className="flex justify-between items-start">
           <h2 className="text-lg font-bold text-[#dfe3e1]">Share with @aia</h2>
           <button onClick={onClose} className="text-[#c0c8c5]/40 hover:text-[#dfe3e1] p-1"><X className="w-4 h-4" /></button>
         </div>
         {sent ? (
-          <div className="text-center py-4 space-y-2">
+          <div className="text-centre py-4 space-y-2">
             <div className="text-3xl">📦</div>
             <p className="font-bold text-[#dfe3e1]">Deck shared!</p>
             <p className="text-sm text-[#c0c8c5]/60">@aia will check it out.</p>
@@ -232,9 +232,9 @@ export default function DeckBuilder() {
   // ── LIST VIEW ───────────────────────────────────────────────
   if (view === 'list') return (
     <div className="space-y-8 animate-fade-in py-12">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-centre justify-between flex-wrap gap-3">
         <h1 className="text-4xl font-bold text-[#dfe3e1]">Decks</h1>
-        <button onClick={newDeck} className="flex items-center gap-2 px-5 py-2.5 bg-[#a1d0c6] text-[#033730] font-bold rounded-xl hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-[#a1d0c6]/20">
+        <button onClick={newDeck} className="flex items-centre gap-2 px-5 py-2.5 bg-[#a1d0c6] text-[#033730] font-bold rounded-xl hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-[#a1d0c6]/20">
           <Plus className="w-4 h-4" /> New Deck
         </button>
       </div>
@@ -250,12 +250,12 @@ export default function DeckBuilder() {
             return (
               <div key={d.id} onClick={() => { setDetailId(d.id); setView('detail'); }}
                 className="bg-[#1c2120]/60 border border-[#a1d0c6]/20 hover:border-[#a1d0c6]/50 rounded-2xl overflow-hidden cursor-pointer transition-all group shadow-lg hover:shadow-[0_0_30px_rgba(161,208,198,0.1)]">
-                <div className={`h-16 bg-gradient-to-br ${grad} flex items-center px-4`}>
+                <div className={`h-16 bg-gradient-to-br ${grad} flex items-centre px-4`}>
                   <span className="text-xs font-bold text-[#dfe3e1]/70 font-mono">{creator?.name || d.creator}</span>
                   <span className="ml-auto text-[10px] font-mono text-[#a1d0c6]/50">Official · {total} cards</span>
                 </div>
                 <div className="p-4 space-y-2">
-                  <h3 className="font-bold text-[#dfe3e1] group-hover:text-[#a1d0c6] transition-colors">{d.name}</h3>
+                  <h3 className="font-bold text-[#dfe3e1] group-hover:text-[#a1d0c6] transition-colours">{d.name}</h3>
                   <p className="text-xs text-[#c0c8c5]/50 line-clamp-2">{d.description}</p>
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {d.archetypes.map(a => <span key={a} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#a1d0c6]/10 text-[#a1d0c6] border border-[#a1d0c6]/15">{a}</span>)}
@@ -263,7 +263,7 @@ export default function DeckBuilder() {
                   </div>
                 </div>
                 <div className="px-4 py-3 border-t border-[#dfe3e1]/5 flex justify-end" onClick={e => e.stopPropagation()}>
-                  <button onClick={() => duplicate(d)} className="flex items-center gap-1.5 text-xs text-[#c0c8c5]/50 hover:text-[#a1d0c6] transition-colors">
+                  <button onClick={() => duplicate(d)} className="flex items-centre gap-1.5 text-xs text-[#c0c8c5]/50 hover:text-[#a1d0c6] transition-colours">
                     <Copy className="w-3 h-3" /> Duplicate
                   </button>
                 </div>
@@ -286,20 +286,20 @@ export default function DeckBuilder() {
               return (
                 <div key={d.id} onClick={() => { setDetailId(d.id); setView('detail'); }}
                   className="bg-[#1c2120]/60 border border-[#dfe3e1]/10 hover:border-[#a1d0c6]/30 rounded-2xl overflow-hidden cursor-pointer transition-all group">
-                  <div className={`h-12 bg-gradient-to-br ${grad} flex items-center px-4`}>
+                  <div className={`h-12 bg-gradient-to-br ${grad} flex items-centre px-4`}>
                     <span className="text-[10px] font-mono text-[#dfe3e1]/40">{creator?.name || 'No creator'}</span>
                     <span className="ml-auto text-[10px] font-mono text-[#c0c8c5]/30">{total}/40</span>
                   </div>
                   <div className="p-4">
-                    <h3 className="font-bold text-[#dfe3e1] group-hover:text-[#a1d0c6] transition-colors">{d.name}</h3>
+                    <h3 className="font-bold text-[#dfe3e1] group-hover:text-[#a1d0c6] transition-colours">{d.name}</h3>
                     {d.description && <p className="text-xs text-[#c0c8c5]/50 mt-1 line-clamp-1">{d.description}</p>}
                     <p className="text-[10px] font-mono text-[#c0c8c5]/30 mt-1">{new Date(d.createdAt).toLocaleDateString()}</p>
                     {errs.length > 0 && <p className="text-[10px] text-amber-400/70 mt-1">⚠ {errs[0]}</p>}
                   </div>
                   <div className="px-4 py-2.5 border-t border-[#dfe3e1]/5 flex gap-3 justify-end" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => setShareTarget(d)} className="text-xs text-[#c0c8c5]/40 hover:text-[#a1d0c6] transition-colors">Share</button>
-                    <button onClick={() => { setEditingDeck(JSON.parse(JSON.stringify(d))); setView('editor'); }} className="text-xs text-[#c0c8c5]/40 hover:text-[#a1d0c6] transition-colors">Edit</button>
-                    <button onClick={() => deleteDeck(d.id)} className="text-xs text-[#c0c8c5]/40 hover:text-red-400 transition-colors">Delete</button>
+                    <button onClick={() => setShareTarget(d)} className="text-xs text-[#c0c8c5]/40 hover:text-[#a1d0c6] transition-colours">Share</button>
+                    <button onClick={() => { setEditingDeck(JSON.parse(JSON.stringify(d))); setView('editor'); }} className="text-xs text-[#c0c8c5]/40 hover:text-[#a1d0c6] transition-colours">Edit</button>
+                    <button onClick={() => deleteDeck(d.id)} className="text-xs text-[#c0c8c5]/40 hover:text-red-400 transition-colours">Delete</button>
                   </div>
                 </div>
               );
@@ -327,8 +327,8 @@ export default function DeckBuilder() {
 
     return (
       <div className="space-y-6 animate-fade-in py-12">
-        <div className="flex items-center gap-3 flex-wrap">
-          <button onClick={() => { setDetailId(null); setView('list'); }} className="flex items-center gap-1.5 text-sm text-[#c0c8c5]/60 hover:text-[#a1d0c6] transition-colors">
+        <div className="flex items-centre gap-3 flex-wrap">
+          <button onClick={() => { setDetailId(null); setView('list'); }} className="flex items-centre gap-1.5 text-sm text-[#c0c8c5]/60 hover:text-[#a1d0c6] transition-colours">
             <ChevronLeft className="w-4 h-4" /> Back
           </button>
           <h1 className="text-2xl font-bold text-[#dfe3e1] flex-1">{deck.name}</h1>
@@ -339,7 +339,7 @@ export default function DeckBuilder() {
               className="px-4 py-2 text-sm bg-[#a1d0c6]/10 text-[#a1d0c6] border border-[#a1d0c6]/20 rounded-xl hover:bg-[#a1d0c6]/20 transition-all">Share with @aia</button>
           </>}
           {isPrebuilt && <button onClick={() => duplicate(prebuilt!)}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm border border-[#dfe3e1]/10 text-[#c0c8c5] rounded-xl hover:bg-white/5 transition-all">
+            className="flex items-centre gap-1.5 px-4 py-2 text-sm border border-[#dfe3e1]/10 text-[#c0c8c5] rounded-xl hover:bg-white/5 transition-all">
             <Copy className="w-3 h-3" /> Duplicate
           </button>}
         </div>
@@ -404,13 +404,13 @@ export default function DeckBuilder() {
     return (
       <div className="space-y-6 animate-fade-in py-12">
         {/* Header */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <button onClick={cancelEdit} className="flex items-center gap-1.5 text-sm text-[#c0c8c5]/60 hover:text-[#a1d0c6] transition-colors shrink-0">
+        <div className="flex items-centre gap-3 flex-wrap">
+          <button onClick={cancelEdit} className="flex items-centre gap-1.5 text-sm text-[#c0c8c5]/60 hover:text-[#a1d0c6] transition-colours shrink-0">
             <ChevronLeft className="w-4 h-4" /> Back
           </button>
           <input value={editingDeck.name} onChange={e => setEditingDeck(d => d ? {...d, name: e.target.value} : d)}
             className="flex-1 min-w-0 bg-transparent border-b border-[#a1d0c6]/20 focus:border-[#a1d0c6]/60 py-1 text-2xl font-bold text-[#dfe3e1] outline-none transition-all" />
-          <button onClick={saveEdit} className="flex items-center gap-2 px-5 py-2 bg-[#a1d0c6] text-[#033730] font-bold rounded-xl hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-[#a1d0c6]/20 shrink-0">
+          <button onClick={saveEdit} className="flex items-centre gap-2 px-5 py-2 bg-[#a1d0c6] text-[#033730] font-bold rounded-xl hover:brightness-110 active:scale-95 transition-all shadow-lg shadow-[#a1d0c6]/20 shrink-0">
             <Save className="w-4 h-4" /> Save
           </button>
           <button onClick={cancelEdit} className="p-2 text-[#c0c8c5]/40 hover:text-[#dfe3e1] border border-[#dfe3e1]/5 rounded-xl hover:bg-white/5 transition-all shrink-0"><X className="w-4 h-4" /></button>

@@ -1,282 +1,284 @@
-# DOCUMENT 4: CARD INDEX
-## Set 001 — First Render · Complete Card Reference
+# CARD INDEX
+## Prompt Battle TCG · Set 001: First Render · v0.14
+
+*All 42 cards in Set 001. For full card text, use the Card Gallery in the app.*
 
 ---
 
-### CREATORS
+## CREATORS (2)
 
-**C-001 · AIA**
-CLIP Resistance · Rare · Loyalty 11 · Starting Bonus: +1 Credit
-Passive (CLIP-LOCK Mastery): once per turn, Main Phase, apply CLIP-LOCK to one active Coherent Creation. Not automatic. Turn of application does not count toward Positive Feedback. ① Overrender (3 Rep): target opponent Creation −1 Quality; if it has any Glitch tokens, −2 Quality instead; Quality 0 = destroyed, Creator loses 1 Loyalty. ② Positive Feedback (5 Rep): choose one CLIP-LOCKed Creation, remove its CLIP-LOCK, gain 1 Loyalty per full turn it was locked (max 3). ③ Iridescent Shift (6 Rep): target active Creation gains 2 Visibility, cannot be single-targeted by opponent abilities until your next turn. ⚡ Copy That! (4 Loyalty · 14 Rep): choose up to 3 CLIP-LOCKed Creations, remove their CLIP-LOCK, each deals 1 Loyalty damage to target opponent Creator; if 2 or more target same Creator, that Creator also loses 2 Reputation.
+### C-001 · AIA · Rare
+*Factions: CLIP Resistance / Experimentalist*
+Loyalty 11 · Starting Bonus: +1 Credit
 
-**C-002 · ANONYMOUS USER**
-Legends / Newbies · Mythic · Loyalty 16 · Starting Bonus: +1 Reputation
-Passive (Copycat): when this Creator generates a Creation sharing a Style tag with an opponent active Creation, steal 2 Visibility from that Creation (controlling player chooses if multiple eligible; Visibility cannot go below 0). Influence (Safety in Numbers): at start of each of your turns, all friendly Creations with 3 or fewer Visibility cannot be single-targeted by opponent abilities until your next turn. ① First Post (1 Rep): next Model activation this turn costs 2 fewer Credits (minimum 0); only usable with no active Creations and none in Queue (including Remix Queue); *may be used on Turn 1*. ② Flood the Feed (6 Rep): all queued Creations enter field immediately, each gains 1 extra Glitch token; slot overflow applies. ③ More Than You (4 Rep): if you control more active Creations than opponent, opponent Creator loses 1 Loyalty; you gain 1 Loyalty per Loyalty removed. ⚡ Going Viral (4 Loyalty · 12 Rep): all active Creations gain 3 Visibility; for each Creation crossing the Liked threshold (reaching 6) or Featured threshold (reaching 10) this way, opponent Creator loses 1 Loyalty.
+**Passive — CLIP-LOCK Mastery:** Once per turn during your Main Phase, apply CLIP-LOCK to one of your active Coherent Creations. Coherent Creations do not enter with CLIP-LOCK automatically.
 
----
+**① Overrender** — 3 Rep: Target opponent Creation loses 1 Quality (or 2 if it already has Glitch tokens). Destroyed if Quality 0.
+**② Positive Feedback** — 5 Rep: Remove CLIP-LOCK from one Coherent Creation. Gain 1 Loyalty per full turn it was locked (max 3).
+**③ Iridescent Shift** — 6 Rep: Target active Creation gains 2 Visibility Counters and cannot be targeted by opponent single-target abilities until your next turn.
+**⚡ Copy That!** — 4 Loyalty · 14 Rep: Choose up to 3 CLIP-LOCKed Creations. Remove their locks. Each deals 1 Loyalty damage to target opponent Creator. If 2 or more hit the same Creator, that Creator also loses 2 Reputation.
 
-### MODELS
-
-**M-001 · COHERENT (LOW SETTINGS)**
-Standard — Coherent Variant · Rare · Play 3 · Activate 4 · Quality 3 · Runtime 2
-Compatible: Fantasy, Landscape. Incompatible: Portrait. +1 Visibility on entry. CLIP-LOCK eligible. *Guaranteed Model (Aia deck).*
-
-**M-002 · JUGGERNAUT V9**
-Standard · Uncommon · Play 2 · Activate 3 · Quality 2 · Runtime 2
-Compatible: Portrait, Abstract. Incompatible: Landscape. Abstract Creations +1 Quality on entry. *Guaranteed Model (Aia deck).*
-
-**M-003 · SDXL**
-Standard · Uncommon · Play 1 · Activate 2 · Quality 2 · Runtime 1
-Compatible: Portrait, Landscape. Incompatible: Abstract, Atmosphere. Portrait Creations enter with +1 Visibility and 1 Glitch token. *Guaranteed Model (Anon deck).*
-
-**M-004 · STABLE DIFFUSION 1.5**
-Standard · Common · Play 0 · Activate 0 · Quality 1 · Runtime 1
-Compatible: Fantasy, Landscape. Incompatible: Portrait, Atmosphere. All Creations enter with 1 additional Glitch token regardless of other effects. Without a Quality-boosting Prompt or compatible Style, SD1.5 Creations are destroyed immediately on entry — this is intentional. *Guaranteed Model (Anon deck).*
+*In Deck A only.*
 
 ---
 
-### PROMPTS
+### C-002 · ANONYMOUS USER · Mythic
+*Factions: Legends / Newbies*
+Loyalty 16 · Starting Bonus: +1 Reputation
 
-**P-001 · GOOD OLD GREG** *"by Greg Rutkowski"*
-Artist · Common · Cost 1
-Assigns Fantasy tag. If already Fantasy, +1 Quality instead. If Model is SD1.5, +1 Visibility on entry. All Models.
+**Passive — Copycat:** Whenever you generate a Creation that shares a Style tag with an opponent's active Creation, steal 2 Visibility Counters from that Creation (minimum 0).
+**Influence — Safety in Numbers:** At the start of each of your turns, all friendly Creations with 3 or fewer Visibility Counters cannot be targeted by opponent single-target abilities until your next turn.
 
-**P-002 · MEN...** *"beautiful woman"*
-Style · Common · Cost 1
-Assigns Portrait tag. +1 Visibility on entry. All Models except Coherent variants.
+**① First Post** — 1 Rep: Your next Model activation this turn costs 2 fewer Credits. Only usable with no active Creations on field or in Queue.
+**② Flood the Feed** — 6 Rep: All queued Creations enter the field immediately. Each arrives with +1 Glitch token. Slot Overflow applies.
+**③ More Than You** — 4 Rep: If you control more Creations than your opponent, target Creator loses 1 Loyalty. You gain that Loyalty.
+**⚡ Going Viral** — 4 Loyalty · 12 Rep: All active Creations gain 3 Visibility Counters. Each Creation that crosses Liked (6) or Featured (10) threshold deals 1 Loyalty damage to target Creator.
 
-**P-003 · COPYCAT... I MEAN, COPYGAZELLE...** *"Liz Gael"*
-Negative · Uncommon · Cost 3
-Cannot be affected by opponent Modifiers, Artifacts, abilities or Glitch tokens for 3 turns after entering the field. Immunities ignored while in Remix Queue. All Models.
-
-**P-004 · DID YOU STEAL THIS PROMPT?** *"by JB"*
-Artist · Common · Cost 1
-+2 Visibility and +1 Glitch on entry. Glitch cannot be removed until start of your second turn after entry. All Models.
-
-**P-005 · HERE GOES THE PARAGRAPH** *"narrative prompt"*
-Atmosphere · Common · Cost 2
-+2 Glitch and +2 Visibility on entry. All Models except Coherent variants.
-
-**P-006 · ARE YOU CRAZY?!** *"long coherent prompt"*
-Style · Uncommon · Cost 3
-+3 Quality, +1 Runtime. Coherent variants and SD1.5 only.
-
-**P-007 · WHAT'S WRONG WITH THE HANDS?** *"poorly drawn hands"*
-Negative · Common · Cost 1
-+1 Quality. All Models.
-
-**P-008 · SO THAT'S HOW THEY TRAINED IT...** *"watermark"*
-Negative · Common · Cost 2
-+1 Quality. Permanent immunity to Watermark Artifact effects. All Models.
-
-**P-009 · ANOTHER LANDSCAPE** *"oil painting landscape"*
-Style · Common · Cost 1
-Assigns Landscape tag. All Models.
-
-**P-010 · WHAT'S THAT?** *"Salvador Dalí"*
-Artist · Common · Cost 1
-+2 Visibility and +1 Glitch on entry. All Models.
+*In Deck B only.*
 
 ---
 
-### MODIFIERS
+## MODELS (4)
 
-**MO-001 · THE ASTRONAUT**
-Universal Creator · Mythic · Cost 3 · Duration 3 turns
-Friendly Creators only. +3 Loyalty on attach. Generated Creations enter with +2 Visibility. Active Creations gain +1 Visibility at start of each of your turns. On detach: all active Creations gain 1 Glitch token (not blocked by CLIP-LOCK — own card effect), Reputation from this Creator's Creations halved next turn (round down, subject to cap). Cannot be removed, negated or targeted. Cannot be cancelled by Mass Report. Duration cannot change. Deck limit 1.
+### M-001 · COHERENT (LOW SETTINGS) · Rare
+*Standard — Coherent Variant*
+Play 3 · Activate 4 · Quality 3 · Runtime 2
+Compatible: Fantasy, Landscape · Incompatible: Portrait
+Creations enter with +1 Visibility Counter. CLIP-LOCK eligible.
+*Deck A guaranteed Model.*
 
-**MO-002 · ANIME LORA**
-LoRA · Common · Cost 1 · Permanent
-Adds 1 Credit to Model activation cost. Portrait and Fantasy Creations +1 Quality. Landscape Creations −1 Quality (minimum 1). Not for Coherent variants. Does not affect Creations already in Queue. Max 1 LoRA per Model in Quick Duel.
+### M-002 · JUGGERNAUT V9 · Uncommon
+*Standard*
+Play 2 · Activate 3 · Quality 2 · Runtime 2
+Compatible: Portrait, Abstract · Incompatible: Landscape
+Abstract Creations generated by this Model gain +1 Quality on entry.
+*Deck A guaranteed Model.*
 
-**MO-003 · PAINTING LORA**
-LoRA · Common · Cost 1 · Permanent
-Adds 1 Credit to Model activation cost. Abstract and Atmosphere Creations +1 Quality and +1 Visibility on entry. All Models. Does not affect Creations already in Queue. Max 1 LoRA per Model in Quick Duel.
+### M-003 · SDXL · Uncommon
+*Standard*
+Play 1 · Activate 2 · Quality 2 · Runtime 1
+Compatible: Portrait, Landscape · Incompatible: Abstract, Atmosphere
+Portrait Creations enter with +1 Visibility Counter and +1 Glitch token.
+*Deck B guaranteed Model.*
 
-**MO-004 · REALISM LORA**
-LoRA · Common · Cost 1 · Permanent
-Adds 1 Credit to Model activation cost. Portrait Creations +2 Quality, +1 Runtime. All Models. Does not affect Creations already in Queue. Max 1 LoRA per Model in Quick Duel.
-
-**MO-005 · TRENDING**
-Creator · Common · Cost 2 · Duration 3 rounds
-Friendly Creators only. All Creations generated by attached Creator enter with +1 Visibility Counter.
-
-**MO-006 · BAN**
-Creator · Uncommon · Cost 2 · Duration 1 turn per opponent Creator on field at time of play (minimum 1)
-Attached Creator cannot activate abilities. Their Creations generate no Reputation. Can target opponent Creators.
-
-**MO-007 · PRO SUBSCRIPTION**
-Creator · Uncommon · Cost 3 · Duration 3 turns
-Friendly Creators only. Once per turn, activate one Model at half activation cost (round down). PRO-Exclusive Model access. Credit cap +3. +1 Credit per turn. All this Creator's Creations −1 Runtime (minimum 1; does not apply to Remix Queue). Cannot be cancelled by Mass Report. On expiry: Credit cap returns to 10; if you had more than 10 Credits at expiry, lose 5 Reputation (if Reputation reaches 0 or below, lose 1 Loyalty and reset Reputation to 0).
-
-**MO-008 · FEATURED**
-Creation · Uncommon · Cost 2 · Duration 3 turns
-Requires 6+ Visibility on target. Doubles Reputation generation (subject to cap). Creation becomes targetable by all abilities. All negative effects on any other friendly Creation are also applied to this one — unpreventable. If Visibility drops below 6: −1 Quality and discard immediately — unpreventable. Friendly Creations only.
-
-**MO-009 · QUEUE SKIP**
-Model · Uncommon · Cost 2 · Single use
-Next Creation from this Model enters field immediately, bypassing Runtime. Discard after triggering.
-
-**MO-010 · NOISE**
-Model · Common · Cost 1 · Duration 5 turns
-All Creations generated by attached Model enter with −1 Quality (minimum 1). Does not affect Creations already in Queue. Can target any Model in Shared Zone.
+### M-004 · STABLE DIFFUSION 1.5 · Common
+*Standard*
+Play 0 · Activate 0 · Quality 1 · Runtime 1
+Compatible: Fantasy, Landscape · Incompatible: Portrait, Atmosphere
+All Creations generated by this Model enter with +1 Glitch token regardless of other effects.
+*Deck B guaranteed Model.*
 
 ---
 
-### ARTIFACTS
+## PROMPTS (10)
 
-**A-001 · CENTAUR PROBLEM**
-Anomaly · Uncommon · Cost 2 · Duration 3 rounds
-All Fantasy Creations enter with 1 Glitch. Existing Fantasy Creations gain 1 Glitch at start of each round. Both players. Removable: 3 Credits, any player, Main Phase.
+### P-001 · GOOD OLD GREG · Common
+*Artist · Keyword: by Greg Rutkowski · Cost: 1*
+Assigns Fantasy Style tag. If Creation already has Fantasy from another source, gains +1 Quality instead. If the activating Model is SD1.5, also enters with +1 Visibility Counter.
+*×3 in Deck B.*
 
-**A-002 · QUEUE TIMEOUT**
-Anomaly · Common · Cost 2 · Duration 3 rounds
-All Model Runtimes +1. Affects existing queued Creations and all future Creations generated while active. Both players. Removable: 3 Credits, any player, Main Phase.
+### P-002 · MEN... · Common
+*Style · Keyword: beautiful woman · Cost: 1*
+Assigns Portrait Style tag. Creation enters with +1 Visibility Counter.
+*×3 in Deck B.*
 
-**A-003 · DOUBLE DRAGON HEAD**
-Anomaly · Common · Cost 2 · Duration 3 turns
-Attach to one Fantasy or Portrait Creation. Halves Reputation generation (round down). Any Creation on field. Removable: 2 Credits, any player, Main Phase. Creation destruction still costs 1 Loyalty regardless of this Modifier.
+### P-003 · COPYCAT... I MEAN, COPYGAZELLE... · Uncommon
+*Negative · Keyword: Liz Gael · Cost: 3*
+The generated Creation cannot be affected by opponent Modifiers, Artifacts, abilities or Glitch tokens for 3 turns after entry.
+*×3 in Deck A.*
 
-**A-004 · CREDIT DROP**
-Condition · Common · Cost 0 · Immediate
-All players gain 3 Credits immediately.
+### P-004 · DID YOU STEAL THIS PROMPT? · Common
+*Artist · Keyword: by JB · Cost: 1*
+Creation enters with +2 Visibility Counters and +1 Glitch token. The Glitch token cannot be removed or negated until the start of your second turn after entry.
+*×2 in Deck B.*
 
-**A-005 · SERVER OVERLOAD**
-Condition · Uncommon · Cost 8 · Duration 3 rounds
-All Model activations cost +1 Credit. All Creations generate −1 Visibility per turn (minimum 0). Both players. Not removable.
+### P-005 · HERE GOES THE PARAGRAPH · Common
+*Atmosphere · Keyword: narrative prompt · Cost: 2*
+Creation enters with +2 Glitch tokens and +2 Visibility Counters.
+*×2 in Deck B.*
 
-**A-006 · ALGORITHM SWAP**
-Condition · Uncommon · Cost 2 · Until start of your next turn
-Choose two Style tags. Until the start of your next turn, all existing Creations on the field and in Queues with one of the chosen Style tags are treated as having the other for all game purposes (Copycat, Daily Challenges, compatibility, LoRA bonuses/penalties, Centaur Problem, Reputation modifiers). When the effect ends, existing Creations revert to their original Style tags. Creations generated while Algorithm Swap is active are assigned the swapped Style tag permanently. Both players.
+### P-006 · ARE YOU CRAZY?! · Uncommon
+*Style · Keyword: long coherent prompt · Cost: 3*
+Creation gains +3 Quality but Runtime increases by 1.
+Compatible with Coherent variants and SD1.5 only.
+*×3 in Deck A.*
+
+### P-007 · WHAT'S WRONG WITH THE HANDS? · Common
+*Negative · Keyword: poorly drawn hands · Cost: 1*
+Creation gains +1 Quality.
+*×3 in Deck A.*
+
+### P-008 · SO THAT'S HOW THEY TRAINED IT... · Common
+*Negative · Keyword: watermark · Cost: 2*
+Creation gains +1 Quality and is permanently immune to Watermark Artifact effects.
+*Not in starter decks.*
+
+### P-009 · ANOTHER LANDSCAPE · Common
+*Style · Keyword: oil painting landscape · Cost: 1*
+Assigns Landscape Style tag.
+*×2 in Deck A.*
+
+### P-010 · WHAT'S THAT? · Common
+*Artist · Keyword: Salvador Dalí · Cost: 1*
+Creation enters with +2 Visibility Counters and +1 Glitch token.
+*×1 in each starter deck.*
 
 ---
 
-### EVENTS
+## MODIFIERS (10)
 
-**E-001 · MASS REPORT**
-Drama · Instant · Uncommon · Cost 7 Reputation
-May be played during either player's turn, in response to a Modifier card being played. Cancel that Modifier — it is discarded without effect. Mass Report is then discarded. Cannot cancel The Astronaut or PRO Subscription. This is the only Instant in First Render that may be played during the opponent's turn.
+### MO-001 · THE ASTRONAUT · Mythic
+*Universal Creator · Cost: 3 · Duration: 3 turns · Deck limit: 1*
+On attach: target Creator gains +3 Loyalty immediately. All Creations they generate enter with +2 Visibility Counters. All their active Creations gain +1 Visibility Counter at the start of each of your turns.
+On detach: all their active Creations gain +1 Glitch token. Reputation from their Creations is halved next turn.
+Cannot be removed, negated, or cancelled by Mass Report.
+*×1 in each starter deck.*
 
-**E-002 · COMMUNITY DRAMA**
-Drama · Instant · Uncommon · Cost 7
-Target opponent Creator loses 2 Loyalty. Their controller draws 1 card.
+### MO-002 · ANIME LORA · Common
+*LoRA · Cost: 1 · Duration: Permanent*
+Attaches to any non-Coherent Model.
+Portrait and Fantasy Creations generated by this Model gain +1 Quality. Landscape Creations lose 1 Quality (minimum 1).
+*×2 in Deck B.*
 
-**E-003 · PROMPT THEFT**
-Drama · Instant · Uncommon · Cost 3
-During your Main Phase, if your opponent activated a Model during their most recent turn, you may play this card. Choose one of your Models in the Shared Zone and activate it, copying one Prompt used in the opponent's activation (if any). You pay your own Model's activation cost plus any LoRA surcharge. The copied Prompt does not need to be in your hand — it is replicated by this effect. Style compatibility and incompatibility are determined by your Model, not the opponent's. This counts as your Model activation for this turn.
+### MO-003 · PAINTING LORA · Common
+*LoRA · Cost: 1 · Duration: Permanent*
+Attaches to any Model.
+Abstract and Atmosphere Creations generated by this Model gain +1 Quality and +1 Visibility Counter on entry.
+*×2 in Deck A.*
 
-**E-004 · PRIORITY RENDERING**
-Site Update · Instant · Uncommon · Cost 3
-Move one of your queued Creations to arrive at the start of your next turn. Cannot target Creations in the Remix Queue.
+### MO-004 · REALISM LORA · Common
+*LoRA · Cost: 1 · Duration: Permanent*
+Attaches to any Model.
+Portrait Creations generated by this Model gain +2 Quality but Runtime increases by 1.
+*Not in starter decks.*
 
-**E-005 · GPU BOOST**
-Site Update · Instant · Common · Cost 2
+### MO-005 · TRENDING · Common
+*Creator · Cost: 2 · Duration: 3 rounds*
+All Creations generated by the attached Creator enter with +1 Visibility Counter.
+*×2 in Deck A.*
+
+### MO-006 · BAN · Uncommon
+*Creator · Cost: 2 · Duration: 1 turn per opponent Creator on field at time of play (min 1)*
+The affected Creator cannot activate abilities. Their active Creations generate no Reputation while attached. Can be played on opponent Creators.
+*×2 in Deck B.*
+
+### MO-007 · PRO SUBSCRIPTION · Uncommon
+*Creator · Cost: 3 · Duration: 3 turns*
+Once per turn, activate one Model at half cost (round down). Credit cap increases by 3. Gain +1 Credit at start of each of your turns. All Runtimes for this Creator's Creations reduced by 1 (minimum 1). Cannot be cancelled by Mass Report.
+On expiry: Credit cap returns to 10. If you had more than 10 Credits, lose 5 Reputation. If Reputation reaches 0 or below, lose 1 Loyalty and reset Reputation to 0.
+*×1 in Deck A.*
+
+### MO-008 · FEATURED · Uncommon
+*Creation · Cost: 2 · Duration: 3 turns*
+Attaches to one of your active Creations with 6+ Visibility Counters.
+Doubles Reputation generation (subject to cap). That Creation can now be targeted by all abilities.
+Whenever any of your other active Creations receives a negative effect, that effect also applies to this Creation. Cannot be prevented.
+If Visibility drops below 6 while attached: Creation loses 1 Quality and this Modifier is discarded immediately.
+*×2 in Deck B.*
+
+### MO-009 · QUEUE SKIP · Uncommon
+*Model · Cost: 2 · Duration: Single use*
+Attaches to any Model in the Shared Zone.
+The next Creation generated by this Model enters the field immediately, bypassing Runtime entirely.
+*×2 in Deck A.*
+
+### MO-010 · NOISE · Common
+*Model · Cost: 1 · Duration: 5 turns*
+Attaches to any Model in the Shared Zone, including opponent Models.
+All Creations generated by this Model enter with −1 Quality (minimum 1) for the duration.
+*×2 in Deck B.*
+
+---
+
+## ARTIFACTS (6)
+
+### A-001 · CENTAUR PROBLEM · Uncommon
+*Anomaly · Cost: 2 · Duration: 3 rounds*
+All Fantasy Creations entering the field arrive with +1 Glitch token. At the start of each round, all existing Fantasy Creations on the field gain +1 Glitch token. Affects both players.
+Either player may spend 3 Credits during their Main Phase to remove this Artifact.
+*×2 in Deck A.*
+
+### A-002 · QUEUE TIMEOUT · Common
+*Anomaly · Cost: 2 · Duration: 3 rounds*
+All Model Runtimes increase by 1 for the duration. Affects existing queued Creations and future Creations. Affects both players.
+Either player may spend 3 Credits during their Main Phase to remove this Artifact.
+*×2 in Deck B.*
+
+### A-003 · DOUBLE DRAGON HEAD · Common
+*Anomaly · Cost: 2 · Duration: 3 turns*
+Attaches to one target Fantasy or Portrait Creation on the field (any player's). That Creation's Reputation generation is halved (round down) for the duration.
+Either player may spend 2 Credits during their Main Phase to remove this Artifact.
+*×1 in Deck B.*
+
+### A-004 · CREDIT DROP · Common
+*Condition · Cost: 0 · Immediate*
+All players gain 3 Credits immediately (subject to Credit cap).
+*×2 in Deck A · ×1 in Deck B.*
+
+### A-005 · SERVER OVERLOAD · Uncommon
+*Condition · Cost: 8 · Duration: 3 rounds*
+All Model activations cost 1 additional Credit for the duration. All active Creations generate 1 fewer Visibility Counter per turn (minimum 0). Affects both players. Cannot be removed.
+*×1 in Deck B.*
+
+### A-006 · ALGORITHM SWAP · Uncommon
+*Condition · Cost: 2 · Duration: Until start of your next turn*
+Choose two Style tags. Until the start of your next turn, all Creations on the field and in Queues with one of the chosen Style tags are treated as having the other for all game purposes. Creations generated while active receive the swapped Style tag permanently.
+*×1 in Deck A.*
+
+---
+
+## EVENTS (10)
+
+### E-001 · MASS REPORT · Uncommon
+*Drama · Instant · Cost: 7 Reputation*
+Play during either player's turn, in response to a Modifier card being played. Cancel that Modifier — discarded without effect. Cannot cancel The Astronaut or PRO Subscription. This is the only Instant in Set 001 playable during the opponent's turn.
+*Not in starter decks.*
+
+### E-002 · COMMUNITY DRAMA · Uncommon
+*Drama · Instant · Cost: 7 Credits*
+Target opponent Creator loses 2 Loyalty. That Creator's controller draws 1 card.
+*×3 in Deck B.*
+
+### E-003 · PROMPT THEFT · Uncommon
+*Drama · Instant · Cost: 3 Credits*
+Usable if your opponent activated a Model on their most recent turn. Activate one of your Models, copying one Prompt used in the opponent's activation. You pay your Model's activation cost plus any LoRA surcharge. Counts as your Model activation for this turn.
+*×3 in Deck B.*
+
+### E-004 · PRIORITY RENDERING · Uncommon
+*Site Update · Instant · Cost: 3 Credits*
+Move one of your queued Creations to arrive at the start of your next turn, regardless of remaining Runtime. Cannot target Creations in the Remix Queue.
+*×3 in Deck A.*
+
+### E-005 · GPU BOOST · Common
+*Site Update · Instant · Cost: 2 Credits*
 Reduce one of your queued Creations' Runtime by 2 (minimum 1). Cannot target Creations in the Remix Queue.
+*×3 in Deck A.*
 
-**E-006 · QUEUE CRASH**
-Site Update · Instant · Uncommon · Cost 3
+### E-006 · QUEUE CRASH · Uncommon
+*Site Update · Instant · Cost: 3 Credits*
 Target one opponent queued Creation or one opponent Creation in the Remix Queue. Its Runtime increases by 2 (or return is delayed by 2 turns if in Remix Queue).
+*×3 in Deck B.*
 
-**E-007 · TIP RECEIVED**
-Community Event · Main Phase · Uncommon · Cost 0
-Requires PRO Subscription on one of your Creators. Gain 4 Credits immediately.
+### E-007 · TIP RECEIVED · Uncommon
+*Community Event · Main Phase · Cost: 0 Credits*
+Requires a PRO Subscription Modifier attached to one of your Creators. Gain 4 Credits immediately (subject to Credit cap).
+*×2 in Deck A.*
 
-**E-008 · GENERATION CANCELLED**
-Site Update · Instant · Uncommon · Cost 2
-Target one opponent queued Creation. Remove from Queue. No Loyalty loss. Credits not refunded. Cannot target Creations in the Remix Queue.
+### E-008 · GENERATION CANCELLED · Uncommon
+*Site Update · Instant · Cost: 2 Credits*
+Target one of your opponent's queued Creations. Remove it from the Queue. Credits spent on its activation are not refunded. Cannot target Creations in the Remix Queue.
+*×2 in Deck A.*
 
-**E-009 · DAILY CHALLENGE: ABSTRACTIONS**
-Daily Challenge · Main Phase · Uncommon · Cost 2
-All Abstract Creations generate double Reputation this round (subject to cap). Player gaining most Reputation from Abstract Creations this round gains 3 bonus Reputation at round end (subject to cap).
+### E-009 · DAILY CHALLENGE: ABSTRACTIONS · Uncommon
+*Daily Challenge · Main Phase · Cost: 2 Credits*
+Duration: This round. All Abstract Creations generate double Reputation this round (subject to cap). The player who earns the most Reputation from Abstract Creations this round gains 3 bonus Reputation at the end of the round.
+*×2 in Deck A.*
 
-**E-010 · DAILY CHALLENGE: PORTRAITS**
-Daily Challenge · Main Phase · Uncommon · Cost 2
-All Portrait Creations generate double Reputation this round (subject to cap). Each Portrait Creation entering the field this round gains 1 bonus Visibility immediately. Player controlling most Portrait Creations at round end gains 3 bonus Reputation (subject to cap).
-
----
-
-### DECK LISTS
-
----
-
-**DECK A — AIA**
-*CLIP Resistance · Control*
-
-Creator (outside deck): C-001 · Aia
-Guaranteed Models (set aside): M-001 · Coherent (Low Settings), M-002 · Juggernaut v9
-
-Prompts (12):
-- ×3 P-003 · Copycat... I Mean, Copygazelle...
-- ×3 P-006 · Are You Crazy?!
-- ×3 P-007 · What's Wrong with the Hands?
-- ×2 P-009 · Another Landscape
-- ×1 P-010 · What's That?
-
-Modifiers (8):
-- ×1 MO-001 · The Astronaut
-- ×2 MO-003 · Painting LoRA
-- ×2 MO-005 · Trending
-- ×2 MO-009 · Queue Skip
-- ×1 MO-007 · PRO Subscription
-
-Artifacts (5):
-- ×2 A-001 · Centaur Problem
-- ×2 A-004 · Credit Drop
-- ×1 A-006 · Algorithm Swap
-
-Events (12):
-- ×3 E-004 · Priority Rendering
-- ×3 E-005 · GPU Boost
-- ×2 E-007 · Tip Received
-- ×2 E-008 · Generation Cancelled
-- ×2 E-009 · Daily Challenge: Abstractions
-
-**Shuffled deck total: 37 cards** ✓
+### E-010 · DAILY CHALLENGE: PORTRAITS · Uncommon
+*Daily Challenge · Main Phase · Cost: 2 Credits*
+Duration: This round. All Portrait Creations generate double Reputation this round. Each time a Portrait Creation enters the field this round, its controller gains +1 Visibility Counter on it immediately. The player with the most Portrait Creations at end of round gains 3 bonus Reputation.
+*×3 in Deck B.*
 
 ---
 
-**DECK B — ANONYMOUS USER**
-*Legends / Newbies · Aggression*
-
-Creator (outside deck): C-002 · Anonymous User
-Guaranteed Models (set aside): M-003 · SDXL, M-004 · Stable Diffusion 1.5
-
-Prompts (11):
-- ×3 P-001 · Good Old Greg
-- ×3 P-002 · Men...
-- ×2 P-004 · Did You Steal This Prompt?
-- ×2 P-005 · Here Goes the Paragraph
-- ×1 P-010 · What's That?
-
-Modifiers (9):
-- ×1 MO-001 · The Astronaut
-- ×2 MO-002 · Anime LoRA
-- ×2 MO-006 · Ban
-- ×2 MO-008 · Featured
-- ×2 MO-010 · Noise
-
-Artifacts (5):
-- ×2 A-002 · Queue Timeout
-- ×1 A-003 · Double Dragon Head
-- ×1 A-004 · Credit Drop
-- ×1 A-005 · Server Overload
-
-Events (12):
-- ×3 E-002 · Community Drama
-- ×3 E-003 · Prompt Theft
-- ×3 E-006 · Queue Crash
-- ×3 E-010 · Daily Challenge: Portraits
-
-**Shuffled deck total: 37 cards** ✓
-
----
-
-### SHARED CARDS — QUICK REFERENCE
-
-| Card | Aia | Anon |
-|---|---|---|
-| MO-001 · The Astronaut | ×1 | ×1 |
-| A-004 · Credit Drop | ×2 | ×1 |
-| P-010 · What's That? | ×1 | ×1 |
-
-*Note: MO-004 Realism LoRA, P-008 So That's How They Trained It..., A-003 Double Dragon Head (Aia), and A-002 Queue Timeout (Aia) are in the set but not in the starter decks shown above. Available for custom deck building.*
+*Prompt Battle TCG · First Render (Set 001) · v0.14 · 42 cards total*
