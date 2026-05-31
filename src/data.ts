@@ -420,6 +420,37 @@ export const DECK_BUILD_RULES = {
 } as const;
 
 // ── Helpers ────────────────────────────────────────────────
+
+// ── Set numbering (FR = First Render, 054 total slots) ──────
+export const SET_NUMBER: Record<string, string> = {
+  // Creators 001–002
+  'C-001': '001', 'C-002': '002',
+  // Models 003–006
+  'M-001': '003', 'M-002': '004', 'M-003': '005', 'M-004': '006',
+  // Prompts 007–016
+  'P-001': '007', 'P-002': '008', 'P-003': '009', 'P-004': '010',
+  'P-005': '011', 'P-006': '012', 'P-007': '013', 'P-008': '014',
+  'P-009': '015', 'P-010': '016',
+  // Modifiers 017–026
+  'MO-001': '017', 'MO-002': '018', 'MO-003': '019', 'MO-004': '020',
+  'MO-005': '021', 'MO-006': '022', 'MO-007': '023', 'MO-008': '024',
+  'MO-009': '025', 'MO-010': '026',
+  // Artifacts 027–032
+  'A-001': '027', 'A-002': '028', 'A-003': '029',
+  'A-004': '030', 'A-005': '031', 'A-006': '032',
+  // Events 033–042
+  'E-001': '033', 'E-002': '034', 'E-003': '035', 'E-004': '036',
+  'E-005': '037', 'E-006': '038', 'E-007': '039', 'E-008': '040',
+  'E-009': '041', 'E-010': '042',
+  // 043–046 showcase/full arts (reserved)
+  // 047–054 reserved
+};
+export const SET_TOTAL = '054';
+export const SET_CODE  = 'FR';
+
+export function getCardSetNumber(id: string): string {
+  return SET_NUMBER[id] ?? '???';
+}
 export function getCardById(id: string): Card | undefined {
   return ALL_CARDS.find(c => c.id === id);
 }

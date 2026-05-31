@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { ALL_CARDS, PREBUILT_DECKS } from '../data';
+import { createPortal } from 'react-dom';
+import { ALL_CARDS, PREBUILT_DECKS, getCardSetNumber, SET_TOTAL, SET_CODE } from '../data';
 import { FORMS, FIELDS } from '../config';
 import { submitToGoogleForm } from '../utils/forms';
 import type { Card } from '../types';
@@ -188,7 +189,12 @@ function CardModal({ card, onClose }: { card: Card; onClose: () => void }) {
               ))}
             </div>
             <p className="text-[10px] italic text-[#c0c8c5]/50 leading-tight">{card.illustration}</p>
-            <p className="text-[9px] font-mono text-[#c0c8c5]/20 mt-2">SET 001 · Prompt Battle TCG</p>
+            <div className="flex items-center justify-between mt-2">
+              <span className="text-[10px] tracking-widest text-[#a1d0c6]/60">{"◆".repeat(card.rarityDots)}</span>
+              <span className="text-[9px] font-mono text-[#c0c8c5]/25 text-right leading-tight">
+                {getCardSetNumber(card.id)}/{SET_TOTAL} · {SET_CODE}<br/>Illustration by @aia
+              </span>
+            </div>
           </div>
 
           {/* Info panel */}
@@ -441,7 +447,7 @@ export default function CardGallery() {
       {activeView === 'bydeck'  && <ByDeckView onSelectCard={setSelected} />}
       {activeView === 'votes'   && <VotesView />}
 
-      {selected && <CardModal card={selected} onClose={() => setSelected(null)} />}
+      {selected && createPortal(<CardModal card={selected} onClose={() => setSelected(null)} />, document.body)}
     </div>
   );
 }
