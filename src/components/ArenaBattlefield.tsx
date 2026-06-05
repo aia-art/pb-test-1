@@ -2,7 +2,8 @@
 // PROMPT BATTLE — ArenaBattlefield · v0.3
 // ============================================================
 
-import { useReducer, useEffect, useRef, useState } from 'react';
+import { useReducer, useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { ALL_CARDS, PREBUILT_DECKS } from '../data';
 import type { Card } from '../types';
@@ -17,6 +18,171 @@ import CreatorAbilityPanel from './CreatorAbilityPanel';
 // ─────────────────────────────────────────────────────────────
 
 const CMAP = new Map(ALL_CARDS.map(c => [c.id, c]));
+
+// ─────────────────────────────────────────────────────────────
+// Deck preference storage
+// ─────────────────────────────────────────────────────────────
+
+const PREF_KEY = 'pb_prefs';
+interface Prefs { lastUsedId?: string; favouriteId?: string; }
+function loadPrefs(): Prefs {
+  try { return JSON.parse(localStorage.getItem(PREF_KEY) ?? '{}'); } catch { return {}; }
+}
+function savePrefs(p: Prefs) { localStorage.setItem(PREF_KEY, JSON.stringify(p)); }
+
+// ─────────────────────────────────────────────────────────────
+// Card detail modal (reuses CardGallery logic inline)
+// ─────────────────────────────────────────────────────────────
+
+const RARITY_COL: Record<string, string> = {
+  common: 'text-[#8a9490]', uncommon: 'text-[#4a9a6e]',
+  rare:   'text-[#a1d0c6]', mythic:   'text-[#cebefa]',
+};
+const TYPE_BORDER: Record<string, string> = {
+  creator:  'border-[#a1d0c6]/60 bg-[#a1d0c6]/10',
+  model:    'border-[#cebefa]/40 bg-[#cebefa]/10',
+  prompt:   'border-[#4a9a6e]/40 bg-[#4a9a6e]/10',
+  modifier: 'border-[#b8842a]/40 bg-[#b8842a]/10',
+  artifact: 'border-[#9b3dbb]/40 bg-[#9b3dbb]/10',
+  event:    'border-[#3d6abb]/40 bg-[#3d6abb]/10',
+};
+const MOOD_G: Record<string, string> = {
+  iridescent: 'from-purple-900/40 via-teal-900/30 to-amber-900/20',
+  chaotic:    'from-red-900/30 via-purple-900/20 to-green-900/20',
+  precise:    'from-blue-900/30 to-teal-900/20',
+  bold:       'from-orange-900/30 to-amber-900/20',
+  neutral:    'from-slate-800/60 to-slate-900/40',
+  grainy:     'from-stone-800/50 to-stone-900/40',
+  epic:       'from-amber-900/40 to-yellow-900/20',
+  ethereal:   'from-indigo-900/40 to-violet-900/20',
+  dark:       'from-zinc-900/60 to-neutral-900/50',
+  warm:       'from-rose-900/30 to-orange-900/20',
+};
+function moodG(card: import('../types').Card) {
+  return MOOD_G[card.illustrationMood ?? 'neutral'] ?? MOOD_G.neutral;
+}
+
+function InGameCardModal({ card, onClose }: { card: import('../types').Card; onClose: () => void }) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const abList = [
+    card.passive   ? { ...card.passive,   _label: 'Passive'   } : null,
+    card.influence ? { ...card.influence, _label: 'Influence' } : null,
+    ...(card.abilities ?? []),
+  ].filter(Boolean) as any[];
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[200] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.92, y: 12 }}
+        animate={{ opacity: 1, scale: 1,    y: 0  }}
+        exit={{    opacity: 0, scale: 0.94, y: 8  }}
+        transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+        className="bg-[#1c2120] border border-[#a1d0c6]/15 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden max-h-[85vh] flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/6 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${TYPE_BORDER[card.type]}`}>{card.type}</span>
+            <span className={`text-[9px] font-mono ${RARITY_COL[card.rarity]}`}>{card.rarity}</span>
+            <span className="text-[9px] font-mono text-[#c0c8c5]/25">{card.id}</span>
+          </div>
+          <button onClick={onClose} className="text-[#c0c8c5]/40 hover:text-[#dfe3e1] transition-colors text-lg leading-none px-1">×</button>
+        </div>
+
+        <div className="flex overflow-y-auto flex-1">
+          {/* Art strip */}
+          <div className={`w-32 shrink-0 bg-gradient-to-br ${moodG(card)} flex flex-col justify-end p-3`}>
+            <p className="text-[9px] italic text-[#c0c8c5]/40 leading-snug">{card.illustration}</p>
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 p-4 space-y-3 overflow-y-auto min-w-0">
+            <div>
+              <h2 className="text-xl font-black text-[#dfe3e1] leading-tight">{card.name}</h2>
+              {card.subtype && <p className="text-[10px] text-[#c0c8c5]/40 uppercase tracking-widest mt-0.5">{card.subtype}</p>}
+            </div>
+
+            {/* Stats chips */}
+            <div className="flex flex-wrap gap-1.5">
+              {card.type === 'creator' && <>
+                <span className="stat-chip">♥ {card.loyalty} Loyalty</span>
+                {card.startingBonus && <span className="stat-chip">{card.startingBonus.display}</span>}
+              </>}
+              {card.type === 'model' && <>
+                <span className="stat-chip">Play {card.playCost ?? 0}Cr</span>
+                <span className="stat-chip">Activate {card.activateCost ?? 0}Cr</span>
+                <span className="stat-chip">Q{card.quality}</span>
+                <span className="stat-chip">RT{card.runtime}</span>
+              </>}
+              {card.cost !== undefined && card.type !== 'creator' && card.type !== 'model' && (
+                <span className="stat-chip">{card.cost}{card.costType === 'reputation' ? ' Rep' : ' Cr'}</span>
+              )}
+              {card.timing   && <span className="stat-chip">{card.timing}</span>}
+              {card.duration && <span className="stat-chip">{card.duration}</span>}
+            </div>
+
+            {/* Compatibility */}
+            {(card.compatible?.length || card.incompatible?.length) && (
+              <div className="flex flex-wrap gap-1">
+                {card.compatible?.map  (s => <span key={s} className="text-[9px] px-1.5 py-0.5 rounded-full border border-green-500/30 text-green-400 bg-green-500/8">✔ {s}</span>)}
+                {card.incompatible?.map(s => <span key={s} className="text-[9px] px-1.5 py-0.5 rounded-full border border-red-500/30   text-red-400   bg-red-500/8">✘ {s}</span>)}
+              </div>
+            )}
+
+            {/* Effect / Abilities */}
+            {card.effect && (
+              <div className="rounded-xl border border-white/6 bg-[#0d1211]/50 p-3">
+                <div className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/35 font-mono mb-1">Effect</div>
+                <p className="text-xs text-[#c0c8c5]/80 leading-relaxed">{card.effect}</p>
+              </div>
+            )}
+            {abList.map((ab: any, i: number) => {
+              const isSig = ab.num === 'signature';
+              const label = ab._label ?? (isSig ? 'Signature' : `Ability ${ab.num}`);
+              const costParts = [
+                ab.cost?.loyalty    && `${ab.cost.loyalty} Loy`,
+                ab.cost?.reputation && `${ab.cost.reputation} Rep`,
+                ab.cost?.credits    && `${ab.cost.credits} Cr`,
+              ].filter(Boolean).join(' · ');
+              return (
+                <div key={i} className={`rounded-xl p-3 border ${isSig ? 'border-[#a1d0c6]/30 bg-[#a1d0c6]/5' : 'border-white/6 bg-[#0d1211]/40'}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-black shrink-0 ${isSig ? 'bg-[#a1d0c6] text-[#033730]' : 'bg-[#262b2a] text-[#a1d0c6]'}`}>
+                      {isSig ? '⚡' : ab._label ? '◈' : ab.num}
+                    </span>
+                    <span className="text-[12px] font-bold text-[#dfe3e1]">{ab.name}</span>
+                    {ab._label && <span className="text-[9px] text-[#c0c8c5]/35 font-mono uppercase">{ab._label}</span>}
+                    {costParts && <span className="ml-auto text-[9px] font-mono text-[#c0c8c5]/45 shrink-0">{costParts}</span>}
+                  </div>
+                  <p className="text-[11px] text-[#c0c8c5]/75 leading-relaxed pl-6">{ab.text}</p>
+                  {ab.timing && <span className="text-[8px] font-mono text-[#c0c8c5]/30 uppercase pl-6 mt-0.5 block">{ab.timing}</span>}
+                </div>
+              );
+            })}
+            {card.favouritePrompt && (
+              <div className="rounded-xl border border-[#cebefa]/20 bg-[#cebefa]/5 p-3">
+                <div className="text-[8px] uppercase tracking-widest text-[#cebefa]/45 font-mono mb-1">Favourite Prompt</div>
+                <p className="text-[11px] font-bold text-[#dfe3e1] italic">"{card.favouritePrompt.text}"</p>
+                <p className="text-[10px] text-[#c0c8c5]/50 mt-1">{card.favouritePrompt.effect}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    </div>,
+    document.body
+  );
+}
+
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const effQ  = (c: Creation) => Math.max(0, c.quality - c.glitchTokens);
 
@@ -51,26 +217,40 @@ const BLANK: GameState = {
 // Sub-components
 // ─────────────────────────────────────────────────────────────
 
-// Loyalty bar
-function LoyaltyBar({ current, max, label }: { current: number; max: number; label: string }) {
+// Health bar (loyalty)
+function HealthBar({ current, max, label, flip = false }: { current: number; max: number; label: string; flip?: boolean }) {
   const pct = Math.max(0, Math.min(100, (current / Math.max(1, max)) * 100));
-  const col = pct > 50 ? '#a1d0c6' : pct > 20 ? '#f2c94c' : '#eb5757';
+  const segments = max;
+  const col = pct > 50 ? '#a1d0c6' : pct > 25 ? '#f2c94c' : '#eb5757';
+  const glowCol = pct > 50 ? 'rgba(161,208,198,0.25)' : pct > 25 ? 'rgba(242,196,76,0.25)' : 'rgba(235,87,87,0.35)';
   return (
-    <div className="flex items-center gap-2 w-full">
-      <span className="text-[9px] font-mono uppercase tracking-widest text-[#c0c8c5]/40 w-7 shrink-0">{label}</span>
-      <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
-        <motion.div className="h-full rounded-full" style={{ backgroundColor: col }} animate={{ width: `${pct}%` }} transition={{ type: 'spring', stiffness: 180, damping: 28 }} />
+    <div className={`flex items-center gap-2 w-full ${flip ? 'flex-row-reverse' : ''}`}>
+      <span className={`text-[9px] font-mono uppercase tracking-widest text-[#c0c8c5]/40 w-6 shrink-0 ${flip ? 'text-right' : ''}`}>{label}</span>
+      <div className="flex-1 flex items-center gap-0.5 h-4">
+        {Array.from({ length: segments }).map((_, i) => {
+          const filled = flip ? (i >= segments - current) : (i < current);
+          return (
+            <div key={i} className="flex-1 h-3 rounded-sm transition-all duration-300"
+              style={{
+                backgroundColor: filled ? col : 'rgba(255,255,255,0.06)',
+                boxShadow: filled && i === (flip ? segments - current : current - 1) ? `0 0 6px ${glowCol}` : 'none',
+              }}
+            />
+          );
+        })}
       </div>
-      <span className="text-[11px] font-bold font-mono text-[#dfe3e1] w-10 text-right shrink-0">♥{current}</span>
+      <span className={`text-[12px] font-black font-mono shrink-0 w-8 ${flip ? 'text-left' : 'text-right'}`} style={{ color: col }}>
+        {current}
+      </span>
     </div>
   );
 }
 
 // Creation token on the battlefield
 function CreationTile({
-  c, mini = false, onClick, glow,
+  c, mini = false, onClick, glow, onInfo,
 }: {
-  c: Creation; mini?: boolean; onClick?: () => void; glow?: 'red' | 'teal' | 'none';
+  c: Creation; mini?: boolean; onClick?: () => void; glow?: 'red' | 'teal' | 'none'; onInfo?: () => void;
 }) {
   const q   = effQ(c);
   const inQ = c.runtimeLeft > 0;
@@ -119,13 +299,19 @@ function CreationTile({
       {c.styleTag && (
         <span className="text-[7px] font-mono uppercase tracking-wider opacity-50 mt-0.5">{c.styleTag}</span>
       )}
+      {onInfo && (
+        <button
+          onClick={e => { e.stopPropagation(); onInfo(); }}
+          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-[8px] text-white/40 hover:text-white/80 transition-all"
+        >?</button>
+      )}
     </motion.div>
   );
 }
 
 // Card in hand
-function HandCard({ card, selected, playable, onClick }: {
-  card: Card; selected?: boolean; playable: boolean; onClick: () => void;
+function HandCard({ card, selected, playable, onClick, onInfo }: {
+  card: Card; selected?: boolean; playable: boolean; onClick: () => void; onInfo?: () => void;
 }) {
   const accent = TYPE_COLOR[card.type] ?? '#a1d0c6';
   const cost   = card.type === 'model'
@@ -158,18 +344,25 @@ function HandCard({ card, selected, playable, onClick }: {
       {card.type === 'model' && (
         <span className="absolute bottom-2 right-2 text-[9px] font-black text-[#cebefa]/60">Q{card.quality}</span>
       )}
+      {onInfo && (
+        <button
+          onClick={e => { e.stopPropagation(); onInfo(); }}
+          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white/8 hover:bg-white/18 flex items-center justify-center text-[8px] text-[#c0c8c5]/50 hover:text-[#dfe3e1] transition-all"
+          title="View card details"
+        >?</button>
+      )}
     </motion.button>
   );
 }
 
 // Guaranteed model badge (set aside, always available)
-function GuaranteedModelBadge({ card, onPlay, canPlay }: { card: Card; onPlay: () => void; canPlay: boolean }) {
+function GuaranteedModelBadge({ card, onPlay, canPlay, onInfo }: { card: Card; onPlay: () => void; canPlay: boolean; onInfo?: () => void }) {
   return (
     <motion.button
       onClick={canPlay ? onPlay : undefined}
       whileHover={canPlay ? { scale: 1.06, y: -3 } : {}}
       whileTap={canPlay   ? { scale: 0.95 } : {}}
-      className={`flex flex-col items-center gap-1 px-2 py-2 rounded-xl border text-center w-20 shrink-0 transition-all
+      className={`relative flex flex-col items-center gap-1 px-2 py-2 rounded-xl border text-center w-20 shrink-0 transition-all
         ${canPlay
           ? 'border-[#cebefa]/40 bg-[#cebefa]/6 hover:bg-[#cebefa]/12 cursor-pointer shadow-[0_0_8px_rgba(206,190,250,0.1)]'
           : 'border-[#cebefa]/10 bg-transparent opacity-40 cursor-not-allowed'
@@ -179,15 +372,21 @@ function GuaranteedModelBadge({ card, onPlay, canPlay }: { card: Card; onPlay: (
       <span className="text-[10px] font-bold text-[#dfe3e1] leading-tight">{card.name}</span>
       <span className="text-[8px] font-mono text-[#cebefa]/50">Q{card.quality} · Free</span>
       {canPlay && <span className="text-[8px] text-[#cebefa]/60">↑ Play</span>}
+      {onInfo && (
+        <button onClick={e => { e.stopPropagation(); onInfo(); }}
+          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white/8 hover:bg-white/18 flex items-center justify-center text-[8px] text-white/35 hover:text-white/70 transition-all"
+        >?</button>
+      )}
     </motion.button>
   );
 }
 
 // Model in shared zone
-function SharedModelCard({ model, canActivate, onActivate }: {
+function SharedModelCard({ model, canActivate, onActivate, onInfo }: {
   model: { modelId: string; activatedThisTurn: boolean; placedByPlayer: PlayerId; activationsThisRound: number };
   canActivate: boolean;
   onActivate: () => void;
+  onInfo?: () => void;
 }) {
   const card = CMAP.get(model.modelId);
   if (!card) return null;
@@ -197,7 +396,7 @@ function SharedModelCard({ model, canActivate, onActivate }: {
       whileHover={canActivate ? { scale: 1.05, y: -2 } : {}}
       whileTap={canActivate   ? { scale: 0.96 } : {}}
       title={canActivate ? `Activate ${card.name} (${card.activateCost ?? 0}Cr)` : model.activatedThisTurn ? 'Already used this turn' : 'Cannot activate now'}
-      className={`flex flex-col items-center gap-1 rounded-xl border px-3 py-2 text-center min-w-[80px] transition-all
+      className={`relative flex flex-col items-center gap-1 rounded-xl border px-3 py-2 text-center min-w-[80px] transition-all
         ${model.activatedThisTurn
           ? 'border-[#cebefa]/8 bg-transparent opacity-25'
           : canActivate
@@ -216,6 +415,11 @@ function SharedModelCard({ model, canActivate, onActivate }: {
         <span className="text-[7px] text-orange-400/60 font-mono">+1 RT (contention)</span>
       )}
       {model.activatedThisTurn && <span className="text-[8px] text-[#c0c8c5]/30 font-mono">Used</span>}
+      {onInfo && (
+        <button onClick={e => { e.stopPropagation(); onInfo(); }}
+          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white/8 hover:bg-white/18 flex items-center justify-center text-[8px] text-white/35 hover:text-white/70 transition-all"
+        >?</button>
+      )}
     </motion.button>
   );
 }
@@ -225,17 +429,38 @@ function SharedModelCard({ model, canActivate, onActivate }: {
 // ─────────────────────────────────────────────────────────────
 
 function DeckPickerScreen({ onStart }: {
-  onStart: (hCreator: string, hDeck: Card[], aCreator: string, aDeck: Card[], diff: Difficulty) => void;
+  onStart: (hCreator: string, hDeck: Card[], aCreator: string, aDeck: Card[], diff: Difficulty, deckId: string) => void;
 }) {
-  const [chosen, setChosen] = useState<number | null>(null);
-  const [diff, setDiff]     = useState<Difficulty>('medium');
+  const prefs = loadPrefs();
+  const [diff, setDiff]       = useState<Difficulty>('medium');
+  const [chosen, setChosen]   = useState<string | null>(prefs.lastUsedId ?? null);
+  const [showBrowser, setShowBrowser] = useState(false);
+  const [previewId, setPreviewId]     = useState<string | null>(null);
+  const [favId, setFavId]             = useState<string | null>(prefs.favouriteId ?? null);
+  const [modalCard, setModalCard]     = useState<import('../types').Card | null>(null);
 
-  function expandDeck(d: typeof PREBUILT_DECKS[0]): Card[] {
+  // All available decks: prebuilt + custom
+  const store = (() => {
+    try { return JSON.parse(localStorage.getItem('pb_decks') ?? '{"version":1,"decks":[]}'); } catch { return { version: 1, decks: [] }; }
+  })();
+  const customDecks: import('../types').CustomDeck[] = store.decks ?? [];
+
+  // Build unified deck list
+  type AnyDeck = { id: string; name: string; description: string; creator: string | null; guaranteedModels: string[]; cards: Record<string, number>; isCustom: boolean; archetypes?: string[]; difficulty?: string; };
+  const allDecks: AnyDeck[] = [
+    ...PREBUILT_DECKS.map(d => ({ ...d, creator: d.creator, isCustom: false, guaranteedModels: d.guaranteedModels ?? [] })),
+    ...customDecks.map(d => ({ ...d, isCustom: true, archetypes: [], difficulty: 'Custom', guaranteedModels: d.guaranteedModels ?? [] })),
+  ];
+
+  // Resolve deck by id
+  function getDeck(id: string): AnyDeck | undefined {
+    return allDecks.find(d => d.id === id);
+  }
+
+  function expandDeck(d: AnyDeck): Card[] {
     const out: Card[] = [];
-    // Guaranteed models go in separately
     for (const gid of d.guaranteedModels) {
-      const c = CMAP.get(gid);
-      if (c) out.push(c);
+      const c = CMAP.get(gid); if (c) out.push(c);
     }
     for (const [id, count] of Object.entries(d.cards)) {
       const c = CMAP.get(id);
@@ -244,97 +469,290 @@ function DeckPickerScreen({ onStart }: {
     return out;
   }
 
-  function go() {
-    if (chosen === null) return;
-    const hd = PREBUILT_DECKS[chosen];
-    const ad = PREBUILT_DECKS[chosen === 0 ? 1 : 0];
-    onStart(hd.creator, expandDeck(hd), ad.creator, expandDeck(ad), diff);
+  function go(deckId: string) {
+    const hd = getDeck(deckId);
+    if (!hd || !hd.creator) return;
+    // AI gets a different deck (opposite prebuilt, or random custom)
+    const others = allDecks.filter(d => d.id !== deckId && d.creator && d.creator !== hd.creator);
+    const ad = others[0] ?? allDecks.find(d => d.id !== deckId) ?? allDecks[0];
+    if (!ad?.creator) return;
+    // Save prefs
+    savePrefs({ ...loadPrefs(), lastUsedId: deckId });
+    onStart(hd.creator, expandDeck(hd), ad.creator, expandDeck(ad), diff, deckId);
   }
 
-  return (
-    <div className="flex flex-col items-center justify-center gap-10 py-16 min-h-[calc(100vh-5rem)]">
-      <div className="text-center">
-        <div className="text-[10px] uppercase tracking-[0.25em] text-[#a1d0c6]/40 font-mono mb-2">Quick Duel</div>
-        <h1 className="text-4xl font-black text-[#dfe3e1] tracking-tight">Choose Your Deck</h1>
-        <p className="text-[#c0c8c5]/40 text-sm mt-2">You'll face the AI with the opposing deck</p>
-      </div>
+  function toggleFav(id: string) {
+    const newFav = favId === id ? undefined : id;
+    setFavId(newFav ?? null);
+    savePrefs({ ...loadPrefs(), favouriteId: newFav });
+  }
 
-      <div className="flex gap-5 flex-wrap justify-center">
-        {PREBUILT_DECKS.map((deck, i) => {
-          const creator = CMAP.get(deck.creator);
-          const isChosen = chosen === i;
-          return (
-            <motion.button
-              key={deck.id}
-              onClick={() => setChosen(i)}
-              whileHover={{ scale: 1.02, y: -5 }}
-              whileTap={{ scale: 0.98 }}
-              className={`relative w-72 text-left rounded-2xl border p-6 transition-all duration-200 overflow-hidden
-                ${isChosen
-                  ? 'border-[#a1d0c6]/50 bg-[#a1d0c6]/6 shadow-[0_8px_32px_rgba(161,208,198,0.15)]'
-                  : 'border-white/8 bg-[#1c2120]/60 hover:border-white/15'
-                }`}
-            >
-              {/* Decorative corner */}
-              <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full transition-all ${isChosen ? 'bg-[#a1d0c6]/6' : 'bg-white/3'}`} />
-              <div className="text-[9px] uppercase tracking-[0.2em] font-mono text-[#a1d0c6]/40 mb-1">Deck {i + 1}</div>
-              <h2 className="text-lg font-black text-[#dfe3e1] leading-tight">{deck.name.split('—')[0].trim()}</h2>
-              <p className="text-[11px] text-[#c0c8c5]/50 leading-relaxed mt-2 mb-4">{deck.description}</p>
-              {creator && (
-                <div className="flex items-center gap-2 py-2 border-t border-white/6">
-                  <span className="text-[9px] text-[#c0c8c5]/30 font-mono">CREATOR</span>
-                  <span className="text-[11px] font-bold text-[#a1d0c6]">{creator.name}</span>
-                  <span className="ml-auto text-[9px] font-mono text-[#c0c8c5]/30">♥{creator.loyalty}</span>
+  const lastUsedDeck = chosen ? getDeck(chosen) : null;
+  const favDeck      = favId  ? getDeck(favId)  : null;
+  const previewDeck  = previewId ? getDeck(previewId) : null;
+
+  // Quick deck card
+  function QuickDeckCard({ deck, label, accent }: { deck: AnyDeck; label: string; accent: string }) {
+    const creator = CMAP.get(deck.creator ?? '');
+    const isFav   = favId === deck.id;
+    return (
+      <div className={`relative rounded-2xl border p-4 flex flex-col gap-2 transition-all ${accent}`}>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="text-[8px] uppercase tracking-[0.2em] font-mono text-[#c0c8c5]/35 mb-0.5">{label}</div>
+            <div className="text-base font-black text-[#dfe3e1] leading-tight">{deck.name.split(' — ')[0]}</div>
+          </div>
+          <button onClick={() => toggleFav(deck.id)}
+            className={`shrink-0 text-lg transition-colors mt-0.5 ${isFav ? 'text-yellow-400' : 'text-[#c0c8c5]/20 hover:text-yellow-400/60'}`}
+            title={isFav ? 'Remove favourite' : 'Mark as favourite'}
+          >★</button>
+        </div>
+        {creator && (
+          <div className="flex items-center gap-1.5 text-[10px] text-[#c0c8c5]/40 font-mono">
+            <span>Creator:</span>
+            <span className="text-[#a1d0c6]">{creator.name}</span>
+            <span className="ml-auto">♥{creator.loyalty}</span>
+          </div>
+        )}
+        {deck.description && (
+          <p className="text-[10px] text-[#c0c8c5]/40 leading-relaxed line-clamp-2">{deck.description}</p>
+        )}
+        <div className="flex gap-2 mt-1">
+          <button onClick={() => setPreviewId(deck.id)}
+            className="flex-1 py-1.5 rounded-lg border border-white/10 text-[10px] text-[#c0c8c5]/50 hover:border-white/20 hover:text-[#c0c8c5]/80 font-mono transition-all"
+          >Preview</button>
+          <motion.button
+            onClick={() => go(deck.id)}
+            whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+            className="flex-1 py-1.5 rounded-lg bg-[#a1d0c6] text-[#0d1211] text-[11px] font-black hover:bg-[#b5dbd4] transition-all"
+          >Play →</motion.button>
+        </div>
+      </div>
+    );
+  }
+
+  // Deck browser modal
+  function DeckBrowser() {
+    return createPortal(
+      <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+        onClick={e => { if (e.target === e.currentTarget) setShowBrowser(false); }}
+      >
+        <motion.div
+          initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+          className="bg-[#1c2120] border border-[#a1d0c6]/12 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
+        >
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/6 shrink-0">
+            <h2 className="text-base font-black text-[#dfe3e1]">All Decks</h2>
+            <button onClick={() => setShowBrowser(false)} className="text-[#c0c8c5]/40 hover:text-[#dfe3e1] text-xl leading-none">×</button>
+          </div>
+          <div className="overflow-y-auto flex-1 p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {allDecks.filter(d => d.creator).map(deck => {
+              const creator = CMAP.get(deck.creator ?? '');
+              const isFav   = favId === deck.id;
+              const isChosen = chosen === deck.id;
+              return (
+                <div key={deck.id}
+                  className={`rounded-xl border p-3 flex flex-col gap-2 transition-all cursor-pointer ${isChosen ? 'border-[#a1d0c6]/40 bg-[#a1d0c6]/6' : 'border-white/8 bg-[#0d1211]/40 hover:border-white/14'}`}
+                  onClick={() => { setChosen(deck.id); setShowBrowser(false); }}
+                >
+                  <div className="flex items-start gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] font-bold text-[#dfe3e1] leading-tight truncate">{deck.name.split(' — ')[0]}</div>
+                      <div className="text-[9px] text-[#c0c8c5]/35 font-mono mt-0.5">{deck.isCustom ? 'Custom' : 'Prebuilt'} · {creator?.name}</div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button onClick={e => { e.stopPropagation(); toggleFav(deck.id); }}
+                        className={`text-base transition-colors ${isFav ? 'text-yellow-400' : 'text-[#c0c8c5]/20 hover:text-yellow-400/60'}`}
+                      >★</button>
+                      <button onClick={e => { e.stopPropagation(); setPreviewId(deck.id); }}
+                        className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-[#c0c8c5]/40 hover:text-[#c0c8c5]/70 font-mono transition-all"
+                      >?</button>
+                    </div>
+                  </div>
+                  {deck.description && (
+                    <p className="text-[9px] text-[#c0c8c5]/35 leading-relaxed line-clamp-2">{deck.description}</p>
+                  )}
+                  <div className="flex gap-1 flex-wrap">
+                    {(deck.archetypes ?? []).map(a => (
+                      <span key={a} className="text-[7px] px-1.5 py-0.5 rounded-full border border-white/8 text-[#c0c8c5]/30 font-mono">{a}</span>
+                    ))}
+                  </div>
+                  {isChosen && <span className="text-[9px] text-[#a1d0c6] font-mono">✓ Selected</span>}
                 </div>
-              )}
-              <div className="flex gap-1 mt-2 flex-wrap">
-                {deck.archetypes.map(a => (
-                  <span key={a} className="text-[8px] px-2 py-0.5 rounded-full border border-white/10 text-[#c0c8c5]/40 font-mono">{a}</span>
-                ))}
-                <span className={`text-[8px] px-2 py-0.5 rounded-full font-mono ml-auto ${
-                  deck.difficulty === 'Beginner' ? 'text-[#6fcf97] border border-[#6fcf97]/30'
-                  : deck.difficulty === 'Intermediate' ? 'text-yellow-400 border border-yellow-400/30'
-                  : 'text-red-400 border border-red-400/30'
-                }`}>{deck.difficulty}</span>
+              );
+            })}
+            {allDecks.filter(d => d.creator).length === 0 && (
+              <div className="col-span-2 text-center py-8 text-[#c0c8c5]/30 text-sm">No decks found. Build one in the Decks tab first!</div>
+            )}
+          </div>
+          {chosen && (
+            <div className="px-4 py-3 border-t border-white/6 shrink-0">
+              <motion.button onClick={() => { setShowBrowser(false); go(chosen); }}
+                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                className="w-full py-2.5 rounded-xl bg-[#a1d0c6] text-[#0d1211] font-black text-sm"
+              >Play with {getDeck(chosen)?.name.split(' — ')[0]} →</motion.button>
+            </div>
+          )}
+        </motion.div>
+      </div>,
+      document.body
+    );
+  }
+
+  // Deck preview modal
+  function DeckPreview() {
+    if (!previewDeck) return null;
+    const creator = CMAP.get(previewDeck.creator ?? '');
+    const cardCounts = Object.entries(previewDeck.cards)
+      .filter(([id]) => CMAP.get(id)?.type !== 'creator')
+      .sort(([,a],[,b]) => b - a);
+    const typeGroups: Record<string, [string, number][]> = {};
+    for (const [id, cnt] of cardCounts) {
+      const c = CMAP.get(id); if (!c) continue;
+      if (!typeGroups[c.type]) typeGroups[c.type] = [];
+      typeGroups[c.type].push([id, cnt]);
+    }
+    const typeOrder = ['model','prompt','modifier','artifact','event'];
+    return createPortal(
+      <div className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+        onClick={e => { if (e.target === e.currentTarget) setPreviewId(null); }}
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.94 }}
+          className="bg-[#1c2120] border border-[#a1d0c6]/15 rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden"
+        >
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/6 shrink-0">
+            <div>
+              <div className="text-base font-black text-[#dfe3e1]">{previewDeck.name.split(' — ')[0]}</div>
+              {creator && <div className="text-[10px] text-[#a1d0c6]/60 font-mono">Creator: {creator.name} · ♥{creator.loyalty}</div>}
+            </div>
+            <button onClick={() => setPreviewId(null)} className="text-[#c0c8c5]/40 hover:text-[#dfe3e1] text-xl">×</button>
+          </div>
+          <div className="overflow-y-auto flex-1 p-4 space-y-3">
+            {/* Guaranteed models */}
+            {previewDeck.guaranteedModels.length > 0 && (
+              <div>
+                <div className="text-[8px] uppercase tracking-widest text-[#cebefa]/45 font-mono mb-1.5">Guaranteed Models</div>
+                <div className="flex gap-2 flex-wrap">
+                  {previewDeck.guaranteedModels.map(id => {
+                    const c = CMAP.get(id);
+                    return c ? (
+                      <button key={id} onClick={() => setModalCard(c)}
+                        className="px-2.5 py-1.5 rounded-lg border border-[#cebefa]/25 bg-[#cebefa]/6 text-[10px] font-bold text-[#dfe3e1] hover:border-[#cebefa]/45 transition-all text-left"
+                      >
+                        <span className="text-[8px] text-[#cebefa]/50 block font-mono">Q{c.quality}</span>
+                        {c.name}
+                      </button>
+                    ) : null;
+                  })}
+                </div>
               </div>
-              {isChosen && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                  className="absolute top-4 right-4 w-5 h-5 rounded-full bg-[#a1d0c6] flex items-center justify-center text-[#0d1211] text-[10px] font-black"
-                >✓</motion.div>
-              )}
-            </motion.button>
-          );
-        })}
+            )}
+            {/* Cards by type */}
+            {typeOrder.filter(t => typeGroups[t]).map(type => (
+              <div key={type}>
+                <div className="text-[8px] uppercase tracking-widest font-mono mb-1.5" style={{ color: TYPE_COLOR[type] + 'aa' }}>{type}s</div>
+                <div className="space-y-0.5">
+                  {typeGroups[type].map(([id, cnt]) => {
+                    const c = CMAP.get(id); if (!c) return null;
+                    return (
+                      <button key={id} onClick={() => setModalCard(c)}
+                        className="w-full flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-white/4 transition-all text-left group"
+                      >
+                        <span className="text-[10px] font-mono text-[#c0c8c5]/35 w-4 text-right">×{cnt}</span>
+                        <span className="text-[11px] text-[#dfe3e1] flex-1 truncate">{c.name}</span>
+                        <span className="text-[8px] text-[#c0c8c5]/25 group-hover:text-[#a1d0c6]/50 font-mono transition-colors">view</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="px-4 py-3 border-t border-white/6 flex gap-2 shrink-0">
+            <button onClick={() => { setChosen(previewDeck.id); setPreviewId(null); setShowBrowser(false); }}
+              className="flex-1 py-2 rounded-xl border border-[#a1d0c6]/30 text-[#a1d0c6] text-[11px] font-bold hover:bg-[#a1d0c6]/8 transition-all"
+            >Select This Deck</button>
+            <button onClick={() => go(previewDeck.id)}
+              className="flex-1 py-2 rounded-xl bg-[#a1d0c6] text-[#0d1211] text-[11px] font-black hover:bg-[#b5dbd4] transition-all"
+            >Play Now →</button>
+          </div>
+        </motion.div>
+      </div>,
+      document.body
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Render
+  const defaultLastUsed = lastUsedDeck ?? (allDecks.find(d => d.id.includes('B') || d.id.includes('b') || d.id.includes('anon')) ?? allDecks[1] ?? allDecks[0]);
+  const defaultFav      = favDeck;
+
+  return (
+    <div className="flex flex-col items-center justify-center gap-8 py-12 min-h-[calc(100vh-5rem)] px-4">
+      <AnimatePresence>
+        {showBrowser && <DeckBrowser />}
+        {previewId   && <DeckPreview />}
+        {modalCard   && <InGameCardModal card={modalCard} onClose={() => setModalCard(null)} />}
+      </AnimatePresence>
+
+      <div className="text-center">
+        <div className="text-[9px] uppercase tracking-[0.25em] text-[#a1d0c6]/35 font-mono mb-2">Quick Duel</div>
+        <h1 className="text-4xl font-black text-[#dfe3e1] tracking-tight">Choose Your Deck</h1>
+        <p className="text-[#c0c8c5]/35 text-sm mt-1.5">You'll face the AI with the opposing deck</p>
       </div>
 
-      <div className="flex flex-col items-center gap-3">
-        <div className="text-[9px] uppercase tracking-widest text-[#c0c8c5]/35 font-mono">AI Difficulty</div>
-        <div className="flex gap-2 p-1 rounded-xl border border-white/8 bg-[#1c2120]/40">
+      {/* Quick options */}
+      <div className="w-full max-w-lg grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {defaultLastUsed && (
+          <QuickDeckCard
+            deck={defaultLastUsed}
+            label={prefs.lastUsedId ? "Last Used" : "Recommended"}
+            accent="border-[#a1d0c6]/20 bg-[#a1d0c6]/4 hover:border-[#a1d0c6]/35"
+          />
+        )}
+        {defaultFav && defaultFav.id !== defaultLastUsed?.id && (
+          <QuickDeckCard
+            deck={defaultFav}
+            label="★ Favourite"
+            accent="border-yellow-400/20 bg-yellow-400/3 hover:border-yellow-400/35"
+          />
+        )}
+        {!defaultFav && allDecks.filter(d => d.creator && d.id !== defaultLastUsed?.id).slice(0,1).map(deck => (
+          <QuickDeckCard
+            key={deck.id}
+            deck={deck}
+            label="Also Available"
+            accent="border-white/8 bg-transparent hover:border-white/15"
+          />
+        ))}
+      </div>
+
+      {/* Choose another */}
+      <button
+        onClick={() => setShowBrowser(true)}
+        className="flex items-center gap-2 px-5 py-2 rounded-xl border border-white/10 text-[#c0c8c5]/50 text-[11px] font-mono hover:border-white/20 hover:text-[#c0c8c5]/80 transition-all"
+      >
+        <span>⊕</span> Choose another deck ({allDecks.filter(d => d.creator).length} available)
+      </button>
+
+      {/* Difficulty */}
+      <div className="flex flex-col items-center gap-2">
+        <div className="text-[9px] uppercase tracking-widest text-[#c0c8c5]/30 font-mono">AI Difficulty</div>
+        <div className="flex gap-1.5 p-1 rounded-xl border border-white/6 bg-[#1c2120]/40">
           {(['easy', 'medium', 'hard'] as Difficulty[]).map(d => (
             <button key={d} onClick={() => setDiff(d)}
               className={`px-4 py-1.5 rounded-lg text-[11px] font-bold font-mono transition-all
-                ${diff === d ? 'bg-[#a1d0c6] text-[#0d1211]' : 'text-[#c0c8c5]/40 hover:text-[#c0c8c5]/70'}`}
+                ${diff === d ? 'bg-[#a1d0c6] text-[#0d1211]' : 'text-[#c0c8c5]/35 hover:text-[#c0c8c5]/65'}`}
             >{d}</button>
           ))}
         </div>
       </div>
-
-      <motion.button
-        onClick={go}
-        disabled={chosen === null}
-        whileHover={chosen !== null ? { scale: 1.04, y: -2 } : {}}
-        whileTap={chosen !== null   ? { scale: 0.97 } : {}}
-        className={`px-10 py-3.5 rounded-2xl font-black text-sm tracking-wide transition-all
-          ${chosen !== null
-            ? 'bg-[#a1d0c6] text-[#0d1211] shadow-[0_4px_24px_rgba(161,208,198,0.3)]'
-            : 'bg-white/5 text-white/20 cursor-not-allowed'
-          }`}
-      >
-        {chosen !== null ? `Play as ${PREBUILT_DECKS[chosen]?.name.split('—')[0].trim().split(' — ')[0].trim()} →` : 'Select a deck to continue'}
-      </motion.button>
     </div>
   );
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // Mulligan screen
@@ -467,6 +885,7 @@ export default function ArenaBattlefield() {
   const [difficulty, setDiff]   = useState<Difficulty>('medium');
   const [state, dispatch]       = useReducer((s: GameState, a: GameAction) => gameReducer(s, a, CMAP), BLANK);
   const [uiMode, setUIMode]     = useState<UIMode>('idle');
+  const [modalCard, setModalCard] = useState<import('../types').Card | null>(null);
   const [pendingAbility, setPendingAbility] = useState<number | 'signature' | null>(null);
   const [selectedPrompts, setSelectedPrompts] = useState<string[]>([]);
   const [msg, setMsg]           = useState('');
@@ -682,6 +1101,10 @@ export default function ArenaBattlefield() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {modalCard && <InGameCardModal card={modalCard} onClose={() => setModalCard(null)} />}
+      </AnimatePresence>
+
       {/* Flash message */}
       <AnimatePresence>
         {msg && (
@@ -725,7 +1148,7 @@ export default function ArenaBattlefield() {
         <div className="flex items-center gap-3 mb-2">
           <div className="flex flex-col gap-0.5 shrink-0">
             <span className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/30 font-mono">AI · {aCreatorCard?.name ?? '—'}</span>
-            <LoyaltyBar current={aiP.creator.loyalty} max={aCreatorCard?.loyalty ?? 10} label="AI" />
+            <HealthBar current={aiP.creator.loyalty} max={aCreatorCard?.loyalty ?? 10} label="AI" flip />
           </div>
           <div className="flex items-center gap-2 ml-auto text-[10px] font-mono text-[#c0c8c5]/30">
             <span>{aiP.creator.reputation}R</span>
@@ -741,6 +1164,7 @@ export default function ArenaBattlefield() {
               <CreationTile key={c.instanceId} c={c}
                 glow={uiMode === 'awaiting_target' && c.runtimeLeft === 0 ? 'red' : 'none'}
                 onClick={() => handleCreationClick(c, 'ai')}
+                onInfo={() => { const mc = CMAP.get(c.sourceModelId); if (mc) setModalCard(mc); }}
               />
             ))}
           </AnimatePresence>
@@ -766,6 +1190,7 @@ export default function ArenaBattlefield() {
                 model={m}
                 canActivate={isMyTurn && !m.activatedThisTurn && (state.round >= 2 || m.placedByPlayer === 'human') && humanP.credits >= (CMAP.get(m.modelId)?.activateCost ?? 0)}
                 onActivate={() => handleModelActivate(m.modelId)}
+                onInfo={() => { const mc = CMAP.get(m.modelId); if (mc) setModalCard(mc); }}
               />
             ))}
           </div>
@@ -814,7 +1239,7 @@ export default function ArenaBattlefield() {
                 <span className="text-[10px] text-[#c0c8c5]/15 italic self-center">Play a model, then activate it to generate a creation</span>
               )}
             </div>
-            <LoyaltyBar current={humanP.creator.loyalty} max={hCreatorCard?.loyalty ?? 10} label="You" />
+            <HealthBar current={humanP.creator.loyalty} max={hCreatorCard?.loyalty ?? 10} label="You" />
             <div className="flex items-center gap-2 text-[10px] font-mono text-[#c0c8c5]/35">
               <span className="text-[#a1d0c6]/60">{humanP.creator.reputation} Rep</span>
               <span>·</span>
@@ -840,6 +1265,7 @@ export default function ArenaBattlefield() {
                     dispatch({ type: 'PLAY_GUARANTEED_MODEL', player: 'human', cardId: c.id });
                     flash(`${c.name} placed in shared zone (free)`);
                   }}
+                  onInfo={() => setModalCard(c)}
                 />
               ))}
             </div>
@@ -872,6 +1298,7 @@ export default function ArenaBattlefield() {
                   selected={selectedPrompts.includes(card.id)}
                   playable={playable}
                   onClick={() => handleHandCard(card)}
+                  onInfo={() => setModalCard(card)}
                 />
               );
             })}
