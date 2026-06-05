@@ -479,59 +479,70 @@ export default function ArenaBattlefield() {
   }
 
   // ── AI mulligan (instant) + AI turns ─────────────────────────
+  // AI mulligan: fires once when mulliganPhase.aiDone becomes false
   useEffect(() => {
     if (!started) return;
-    if (state.phase === 'game_over') return;
+    if (state.phase !== 'mulligan') return;
+    if (state.mulliganPhase.aiDone) return;
+    const timer = setTimeout(() => {
+      dispatch({ type: 'KEEP_HAND', player: 'ai' });
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [started, state.phase, state.mulliganPhase.aiDone]);
 
-    // AI mulligan: always keeps
-    if (state.phase === 'mulligan' && !state.mulliganPhase.aiDone) {
-      const timer = setTimeout(() => {
-        dispatch({ type: 'KEEP_HAND', player: 'ai' });
-      }, 800);
-      return () => clearTimeout(timer);
-    }
-
-    // AI main phase
-    if (state.phase !== 'main' || state.activePlayer !== 'ai') return;
+  // AI turn: fires only when it becomes the AI's main phase turn
+  useEffect(() => {
+    if (!started) return;
+    if (state.phase !== 'main') return;
+    if (state.activePlayer !== 'ai') return;
     if (aiRunning.current) return;
 
     aiRunning.current = true;
     const ai   = createAI(difficulty);
+    // Snapshot the state at turn start — do NOT close over live state
     const snap = state;
+    let endTurnDispatched = false;
 
     (async () => {
       try {
-        await sleep(500);
+        await sleep(600);
         const plan = ai.planFullTurn(snap, ALL_CARDS);
         for (const action of plan) {
-          await sleep(550 + Math.random() * 350);
+          await sleep(500 + Math.random() * 400);
           let ga: GameAction | null = null;
           switch (action.type) {
             case 'PLAY_MODEL': {
-              // Check if it's a guaranteed model (still in guaranteedModels list)
               const isGuaranteed = snap.ai.guaranteedModels?.some(c => c.id === action.cardId);
               ga = isGuaranteed
                 ? { type: 'PLAY_GUARANTEED_MODEL', player: 'ai', cardId: action.cardId! }
                 : { type: 'PLAY_MODEL',             player: 'ai', cardId: action.cardId! };
               break;
             }
-            case 'ACTIVATE_MODEL':       ga = { type: 'ACTIVATE_MODEL',       player: 'ai', modelId: action.cardId!, promptIds: action.promptIds ?? [] }; break;
-            case 'USE_CREATOR_ABILITY':  ga = { type: 'USE_CREATOR_ABILITY',  player: 'ai', abilityNum: action.abilityNum! }; break;
-            case 'PLAY_MODIFIER':        ga = { type: 'PLAY_MODIFIER',        player: 'ai', cardId: action.cardId!, targetId: action.targetId ?? 'creator' }; break;
-            case 'PLAY_ARTIFACT':        ga = { type: 'PLAY_ARTIFACT',        player: 'ai', cardId: action.cardId! }; break;
-            case 'PLAY_EVENT':           ga = { type: 'PLAY_EVENT',           player: 'ai', cardId: action.cardId! }; break;
-            case 'END_TURN':             ga = { type: 'END_TURN',             player: 'ai' }; break;
+            case 'ACTIVATE_MODEL':      ga = { type: 'ACTIVATE_MODEL',      player: 'ai', modelId: action.cardId!, promptIds: action.promptIds ?? [] }; break;
+            case 'USE_CREATOR_ABILITY': ga = { type: 'USE_CREATOR_ABILITY', player: 'ai', abilityNum: action.abilityNum! }; break;
+            case 'PLAY_MODIFIER':       ga = { type: 'PLAY_MODIFIER',       player: 'ai', cardId: action.cardId!, targetId: action.targetId ?? 'creator' }; break;
+            case 'PLAY_ARTIFACT':       ga = { type: 'PLAY_ARTIFACT',       player: 'ai', cardId: action.cardId! }; break;
+            case 'PLAY_EVENT':          ga = { type: 'PLAY_EVENT',          player: 'ai', cardId: action.cardId! }; break;
+            case 'END_TURN':
+              ga = { type: 'END_TURN', player: 'ai' };
+              endTurnDispatched = true;
+              break;
           }
           if (ga) dispatch(ga);
           if (action.type === 'END_TURN') break;
         }
-        await sleep(300);
-        dispatch({ type: 'END_TURN', player: 'ai' });
+        // Safety END_TURN only if the loop didn't already dispatch one
+        if (!endTurnDispatched) {
+          await sleep(300);
+          dispatch({ type: 'END_TURN', player: 'ai' });
+        }
       } finally {
         aiRunning.current = false;
       }
     })();
-  }, [started, state.phase, state.activePlayer, state.turn, state.mulliganPhase.aiDone]);
+  // Only re-run when it genuinely becomes the AI's turn (activePlayer flips to 'ai')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, state.activePlayer, state.phase]);
 
   // Log scroll
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = 0; }, [state.log.length]);
