@@ -91,7 +91,12 @@ function getLegalActions(state: GameState, cardMap: Map<string, Card>): Action[]
   const actions: Action[] = [{ type: 'END_TURN' }];
   const isRound2 = state.round >= 2;
 
-  // Play model
+  // Play guaranteed models (free — no credit cost)
+  for (const card of ai.guaranteedModels ?? []) {
+    actions.push({ type: 'PLAY_MODEL', cardId: card.id });
+  }
+
+  // Play model from hand (costs playCost)
   for (const card of ai.hand) {
     if (card.type === 'model' && ai.credits >= (card.playCost ?? 0)) {
       actions.push({ type: 'PLAY_MODEL', cardId: card.id });
@@ -323,8 +328,13 @@ function pessimisticallyUpdateState(state: GameState, action: Action, allCards: 
     case 'PLAY_MODEL': {
       const card = cardMap.get(action.cardId!);
       if (card) {
-        ai.credits = ai.credits - (card.playCost ?? 0);
-        ai.hand = ai.hand.filter(c => c.id !== action.cardId);
+        const isGuaranteed = (ai.guaranteedModels ?? []).some((c: Card) => c.id === action.cardId);
+        if (isGuaranteed) {
+          ai.guaranteedModels = (ai.guaranteedModels ?? []).filter((c: Card) => c.id !== action.cardId);
+        } else {
+          ai.credits = ai.credits - (card.playCost ?? 0);
+          ai.hand = ai.hand.filter(c => c.id !== action.cardId);
+        }
       }
       break;
     }

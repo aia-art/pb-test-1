@@ -1,386 +1,431 @@
 // ============================================================
-// PROMPT BATTLE — ArenaBattlefield · v0.2
+// PROMPT BATTLE — ArenaBattlefield · v0.3
 // ============================================================
 
-import { useReducer, useEffect, useRef, useState, useCallback } from 'react';
+import { useReducer, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ALL_CARDS, PREBUILT_DECKS } from '../data';
 import type { Card } from '../types';
-import {
-  gameReducer,
-} from '../game-engine';
+import { gameReducer } from '../game-engine';
 import type { GameState, GameAction, Creation, PlayerId } from '../game-engine';
 import { createAI } from '../ai-engine';
 import type { Difficulty } from '../ai-engine';
 import CreatorAbilityPanel from './CreatorAbilityPanel';
 
 // ─────────────────────────────────────────────────────────────
-// Constants
+// Constants & helpers
 // ─────────────────────────────────────────────────────────────
 
-const ALL_CARDS_MAP = new Map(ALL_CARDS.map(c => [c.id, c]));
+const CMAP = new Map(ALL_CARDS.map(c => [c.id, c]));
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const effQ  = (c: Creation) => Math.max(0, c.quality - c.glitchTokens);
 
-function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+const VIS_TIER = (v: number) => v >= 10 ? 'Featured' : v >= 6 ? 'Liked' : v >= 3 ? 'Noticed' : 'Unnoticed';
+const VIS_COL  = (v: number) =>
+  v >= 10 ? 'from-yellow-400/20 to-yellow-400/5 border-yellow-400/40 text-yellow-300'
+  : v >= 6 ? 'from-[#a1d0c6]/20 to-[#a1d0c6]/5 border-[#a1d0c6]/40 text-[#a1d0c6]'
+  : v >= 3 ? 'from-white/8 to-white/3 border-white/15 text-[#c0c8c5]/70'
+  : 'from-white/3 to-transparent border-white/8 text-[#c0c8c5]/30';
 
-function effectiveQ(c: Creation) { return Math.max(0, c.quality - c.glitchTokens); }
-
-const VIS_LABEL = (v: number) =>
-  v >= 10 ? 'Featured' : v >= 6 ? 'Liked' : v >= 3 ? 'Noticed' : 'Unnoticed';
-
-const VIS_COLOR = (v: number) =>
-  v >= 10 ? 'text-yellow-300' : v >= 6 ? 'text-[#a1d0c6]' : v >= 3 ? 'text-[#c0c8c5]/70' : 'text-[#c0c8c5]/25';
-
-// ─────────────────────────────────────────────────────────────
-// Blank initial state (used before START_GAME dispatched)
-// ─────────────────────────────────────────────────────────────
+const TYPE_COLOR: Record<string, string> = {
+  model:    '#cebefa',
+  prompt:   '#6fcf97',
+  modifier: '#f2994a',
+  artifact: '#bb6bd9',
+  event:    '#56a4f5',
+};
 
 function blankPlayer(id: PlayerId): import('../game-engine').PlayerState {
-  return {
-    id, creator: { cardId: '', loyalty: 10, reputation: 0, isExhausted: false },
-    hand: [], deck: [], discard: [],
-    credits: 0, creditCap: 10,
-    field: [], queue: [], remixQueue: null, modifiers: [],
-  };
+  return { id, creator: { cardId: '', loyalty: 10, reputation: 0, isExhausted: false }, hand: [], guaranteedModels: [], deck: [], discard: [], credits: 0, creditCap: 10, field: [], queue: [], remixQueue: null, modifiers: [], mulliganed: false };
 }
 
-const INITIAL_STATE: GameState = {
-  human: blankPlayer('human'),
-  ai:    blankPlayer('ai'),
+const BLANK: GameState = {
+  human: blankPlayer('human'), ai: blankPlayer('ai'),
   sharedModels: [], artifactZone: [],
-  turn: 1, round: 1,
-  activePlayer: 'human',
-  phase: 'main',
-  winner: null,
-  log: [],
-  abilityUsedThisTurn: [],
+  turn: 1, round: 1, activePlayer: 'human',
+  phase: 'mulligan', mulliganPhase: { humanDone: false, aiDone: false },
+  winner: null, log: [], abilityUsedThisTurn: [],
 };
 
 // ─────────────────────────────────────────────────────────────
-// Creation token
+// Sub-components
 // ─────────────────────────────────────────────────────────────
 
-function CreationToken({
-  creation, isOwn, onClick, highlight,
-}: {
-  creation: Creation; isOwn: boolean;
-  onClick?: () => void; highlight?: 'target' | 'glow';
-}) {
-  const eq = effectiveQ(creation);
-  const inQueue = creation.runtimeLeft > 0;
-
+// Loyalty bar
+function LoyaltyBar({ current, max, label }: { current: number; max: number; label: string }) {
+  const pct = Math.max(0, Math.min(100, (current / Math.max(1, max)) * 100));
+  const col = pct > 50 ? '#a1d0c6' : pct > 20 ? '#f2c94c' : '#eb5757';
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, scale: 0.7, y: isOwn ? 20 : -20 }}
-      animate={{ opacity: 1, scale: 1,   y: 0 }}
-      exit={{    opacity: 0, scale: 0.6 }}
-      transition={{ type: 'spring', stiffness: 280, damping: 22 }}
-      onClick={onClick}
-      className={`relative flex flex-col items-center gap-1 rounded-xl px-2 py-2 w-24 shrink-0
-        border transition-all duration-200 select-none
-        ${inQueue
-          ? 'bg-[#1c2120]/40 border-dashed border-[#a1d0c6]/15 opacity-60'
-          : eq <= 0
-            ? 'bg-red-950/40 border-red-500/30'
-            : highlight === 'target'
-              ? 'bg-[#1c2120]/80 border-red-400/60 shadow-[0_0_12px_rgba(248,113,113,0.4)] cursor-pointer'
-              : highlight === 'glow'
-                ? 'bg-[#1c2120]/80 border-[#a1d0c6]/50 shadow-[0_0_10px_rgba(161,208,198,0.25)] cursor-pointer'
-                : 'bg-[#1c2120]/60 border-[#a1d0c6]/10'
-        }
-        ${creation.clipLocked ? 'ring-1 ring-blue-400/40' : ''}
-      `}
-    >
-      {creation.styleTag && (
-        <span className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/40 font-mono">{creation.styleTag}</span>
-      )}
-      {inQueue && (
-        <span className="text-[9px] font-mono text-[#cebefa]/60">RT {creation.runtimeLeft}</span>
-      )}
-      <div className="flex items-baseline gap-0.5">
-        <span className="text-lg font-black text-[#dfe3e1]">{eq}</span>
-        {creation.glitchTokens > 0 && (
-          <span className="text-[9px] text-red-400 font-mono">-{creation.glitchTokens}G</span>
-        )}
+    <div className="flex items-center gap-2 w-full">
+      <span className="text-[9px] font-mono uppercase tracking-widest text-[#c0c8c5]/40 w-7 shrink-0">{label}</span>
+      <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden">
+        <motion.div className="h-full rounded-full" style={{ backgroundColor: col }} animate={{ width: `${pct}%` }} transition={{ type: 'spring', stiffness: 180, damping: 28 }} />
       </div>
-      {!inQueue && (
-        <div className="w-full">
-          <div className={`text-[8px] text-center font-mono ${VIS_COLOR(creation.visibility)}`}>
-            {creation.visibility}v · {VIS_LABEL(creation.visibility)}
-          </div>
-          <div className="w-full h-1 bg-[#0d1211] rounded-full mt-0.5 overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${
-                creation.visibility >= 10 ? 'bg-yellow-400'
-                : creation.visibility >= 6  ? 'bg-[#a1d0c6]'
-                : creation.visibility >= 3  ? 'bg-[#a1d0c6]/50'
-                : 'bg-[#a1d0c6]/15'
-              }`}
-              style={{ width: `${Math.min(100, creation.visibility * 8)}%` }}
-            />
-          </div>
-        </div>
-      )}
-      {creation.clipLocked && (
-        <span className="text-[8px] bg-blue-900/50 text-blue-300 px-1 rounded font-mono">🔒</span>
-      )}
-      <span className="text-[7px] text-[#c0c8c5]/20 font-mono truncate w-full text-center">
-        {ALL_CARDS_MAP.get(creation.sourceModelId)?.name ?? '?'}
-      </span>
-    </motion.div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Creator stat bar
-// ─────────────────────────────────────────────────────────────
-
-function CreatorBar({
-  label, loyalty, maxLoyalty, rep, credits, isActive, isExhausted,
-}: {
-  label: string; loyalty: number; maxLoyalty: number;
-  rep: number; credits: number; isActive: boolean; isExhausted: boolean;
-}) {
-  const loyPct = Math.max(0, Math.min(100, (loyalty / Math.max(1, maxLoyalty)) * 100));
-  return (
-    <div className={`flex items-center gap-3 px-3 py-2 rounded-xl border transition-all
-      ${isActive ? 'border-[#a1d0c6]/30 bg-[#a1d0c6]/5' : 'border-[#a1d0c6]/8 opacity-60'}`}
-    >
-      <span className="text-[10px] uppercase tracking-widest text-[#c0c8c5]/50 font-mono w-8 shrink-0">{label}</span>
-      <div className="flex-1 h-2 bg-[#0d1211] rounded-full overflow-hidden">
-        <motion.div
-          className={`h-full rounded-full ${
-            loyPct > 40 ? 'bg-[#a1d0c6]' : loyPct > 15 ? 'bg-yellow-400' : 'bg-red-500'
-          }`}
-          animate={{ width: `${loyPct}%` }}
-          transition={{ type: 'spring', stiffness: 200, damping: 30 }}
-        />
-      </div>
-      <span className="text-[11px] font-bold text-[#dfe3e1] font-mono shrink-0">
-        ♥{loyalty}<span className="text-[#c0c8c5]/30">/{maxLoyalty}</span>
-      </span>
-      <span className="text-[10px] text-[#a1d0c6]/60 font-mono shrink-0">{rep}R</span>
-      <span className="text-[10px] text-yellow-400/60 font-mono shrink-0">{credits}Cr</span>
-      {isExhausted && <span className="text-[8px] text-orange-400/60 font-mono shrink-0">exhaust</span>}
+      <span className="text-[11px] font-bold font-mono text-[#dfe3e1] w-10 text-right shrink-0">♥{current}</span>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Hand card
-// ─────────────────────────────────────────────────────────────
-
-const TYPE_ACCENT: Record<string, string> = {
-  model:    'border-[#cebefa]/30 hover:border-[#cebefa]/60 hover:bg-[#cebefa]/8',
-  prompt:   'border-[#4a9a6e]/30 hover:border-[#4a9a6e]/60 hover:bg-[#4a9a6e]/8',
-  modifier: 'border-[#b8842a]/30 hover:border-[#b8842a]/60 hover:bg-[#b8842a]/8',
-  artifact: 'border-[#9b3dbb]/30 hover:border-[#9b3dbb]/60 hover:bg-[#9b3dbb]/8',
-  event:    'border-[#3d6abb]/30 hover:border-[#3d6abb]/60 hover:bg-[#3d6abb]/8',
-};
-
-function HandCard({ card, selected, playable, onClick }: {
-  card: Card; selected: boolean; playable: boolean; onClick: () => void;
+// Creation token on the battlefield
+function CreationTile({
+  c, mini = false, onClick, glow,
+}: {
+  c: Creation; mini?: boolean; onClick?: () => void; glow?: 'red' | 'teal' | 'none';
 }) {
-  const cost = card.type === 'model'
-    ? `P${card.playCost ?? 0}/A${card.activateCost ?? 0}`
-    : card.cost !== undefined ? `${card.cost}${card.costType === 'reputation' ? 'R' : 'Cr'}` : '';
+  const q   = effQ(c);
+  const inQ = c.runtimeLeft > 0;
+  const vc  = VIS_COL(c.visibility);
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, scale: 0.75, y: 12 }}
+      animate={{ opacity: inQ ? 0.55 : 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.6, y: -8 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 24 }}
+      onClick={onClick}
+      whileHover={onClick ? { scale: 1.05, y: -3 } : {}}
+      className={`relative rounded-xl border bg-gradient-to-b flex flex-col items-center select-none
+        ${vc} ${mini ? 'w-20 py-2 px-1 gap-0.5' : 'w-24 py-3 px-2 gap-1'}
+        ${inQ ? 'border-dashed' : ''}
+        ${onClick ? 'cursor-pointer' : ''}
+        ${glow === 'red'  ? 'ring-1 ring-red-400/60 shadow-[0_0_12px_rgba(235,87,87,0.35)]' : ''}
+        ${glow === 'teal' ? 'ring-1 ring-[#a1d0c6]/50 shadow-[0_0_10px_rgba(161,208,198,0.25)]' : ''}
+        ${c.clipLocked ? 'ring-1 ring-blue-400/50' : ''}
+      `}
+    >
+      {inQ && <span className="text-[8px] font-mono text-[#cebefa]/60 uppercase tracking-wide">Queue</span>}
+      {inQ
+        ? <span className="text-2xl font-black opacity-40">⏳</span>
+        : <span className={`font-black leading-none ${mini ? 'text-2xl' : 'text-3xl'} ${q <= 1 ? 'text-red-400' : 'text-[#dfe3e1]'}`}>{q}</span>
+      }
+      {inQ
+        ? <span className="text-[10px] font-mono text-[#cebefa]/70">RT {c.runtimeLeft}</span>
+        : <span className={`text-[8px] font-mono uppercase tracking-wide ${mini ? '' : 'mt-0.5'}`}>{VIS_TIER(c.visibility)} {c.visibility}v</span>
+      }
+      {!inQ && (
+        <div className="w-full mt-0.5">
+          <div className="w-full h-0.5 rounded-full bg-white/10 overflow-hidden">
+            <div className="h-full rounded-full bg-current opacity-60 transition-all duration-500" style={{ width: `${Math.min(100, c.visibility * 8)}%` }} />
+          </div>
+        </div>
+      )}
+      {c.glitchTokens > 0 && (
+        <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center">G{c.glitchTokens}</span>
+      )}
+      {c.clipLocked && (
+        <span className="absolute -top-1.5 -left-1.5 text-[10px]">🔒</span>
+      )}
+      {c.styleTag && (
+        <span className="text-[7px] font-mono uppercase tracking-wider opacity-50 mt-0.5">{c.styleTag}</span>
+      )}
+    </motion.div>
+  );
+}
+
+// Card in hand
+function HandCard({ card, selected, playable, onClick }: {
+  card: Card; selected?: boolean; playable: boolean; onClick: () => void;
+}) {
+  const accent = TYPE_COLOR[card.type] ?? '#a1d0c6';
+  const cost   = card.type === 'model'
+    ? `P${card.playCost ?? 0} / A${card.activateCost ?? 0}`
+    : card.cost !== undefined ? `${card.cost}${card.costType === 'reputation' ? ' Rep' : ' Cr'}` : '';
 
   return (
     <motion.button
-      onClick={onClick}
-      whileHover={playable ? { y: -8, scale: 1.05 } : {}}
-      whileTap={playable   ? { scale: 0.95 } : {}}
-      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-      className={`relative flex flex-col items-start gap-0.5 rounded-lg border px-2.5 py-2 w-24 shrink-0 text-left
-        transition-all duration-150
+      onClick={playable || selected ? onClick : undefined}
+      whileHover={playable ? { y: -10, scale: 1.06 } : {}}
+      whileTap={playable   ? { scale: 0.94 } : {}}
+      transition={{ type: 'spring', stiffness: 320, damping: 22 }}
+      className={`relative flex flex-col text-left rounded-xl border px-2.5 pt-2 pb-2 w-[90px] shrink-0 gap-1 transition-all duration-150
         ${selected
-          ? 'border-[#a1d0c6]/70 bg-[#a1d0c6]/15 shadow-[0_0_14px_rgba(161,208,198,0.3)]'
+          ? 'border-[#a1d0c6]/80 shadow-[0_0_14px_rgba(161,208,198,0.4)] bg-[#a1d0c6]/10'
           : playable
-            ? (TYPE_ACCENT[card.type] ?? 'border-[#a1d0c6]/20 hover:border-[#a1d0c6]/40')
-            : 'border-white/5 opacity-30 cursor-not-allowed'
+            ? 'border-white/10 hover:border-white/25 bg-[#1c2120]/70 cursor-pointer'
+            : 'border-white/5 bg-[#1c2120]/30 opacity-35 cursor-not-allowed'
         }`}
     >
-      <div className={`w-full h-0.5 rounded-full mb-1 ${
-        card.type === 'model'    ? 'bg-[#cebefa]/50'
-        : card.type === 'prompt'   ? 'bg-[#4a9a6e]/60'
-        : card.type === 'modifier' ? 'bg-[#b8842a]/60'
-        : card.type === 'artifact' ? 'bg-[#9b3dbb]/60'
-        : 'bg-[#3d6abb]/60'
-      }`} />
-      <span className="text-[9px] text-[#c0c8c5]/40 uppercase tracking-widest font-mono">{card.type}</span>
-      <span className="text-[11px] font-semibold text-[#dfe3e1] leading-tight line-clamp-2">{card.name}</span>
-      {cost && <span className="text-[9px] text-[#a1d0c6]/60 font-mono mt-auto pt-1">{cost}</span>}
+      {/* Type stripe */}
+      <div className="absolute top-0 inset-x-0 h-[3px] rounded-t-xl" style={{ backgroundColor: accent + '99' }} />
+      {/* Type label */}
+      <span className="text-[8px] uppercase tracking-widest font-mono mt-0.5" style={{ color: accent + 'aa' }}>{card.type}</span>
+      {/* Name */}
+      <span className="text-[11px] font-bold text-[#dfe3e1] leading-tight line-clamp-2 flex-1">{card.name}</span>
+      {/* Cost */}
+      {cost && <span className="text-[9px] font-mono text-[#c0c8c5]/45 mt-auto">{cost}</span>}
+      {/* Model quality badge */}
+      {card.type === 'model' && (
+        <span className="absolute bottom-2 right-2 text-[9px] font-black text-[#cebefa]/60">Q{card.quality}</span>
+      )}
+    </motion.button>
+  );
+}
+
+// Guaranteed model badge (set aside, always available)
+function GuaranteedModelBadge({ card, onPlay, canPlay }: { card: Card; onPlay: () => void; canPlay: boolean }) {
+  return (
+    <motion.button
+      onClick={canPlay ? onPlay : undefined}
+      whileHover={canPlay ? { scale: 1.06, y: -3 } : {}}
+      whileTap={canPlay   ? { scale: 0.95 } : {}}
+      className={`flex flex-col items-center gap-1 px-2 py-2 rounded-xl border text-center w-20 shrink-0 transition-all
+        ${canPlay
+          ? 'border-[#cebefa]/40 bg-[#cebefa]/6 hover:bg-[#cebefa]/12 cursor-pointer shadow-[0_0_8px_rgba(206,190,250,0.1)]'
+          : 'border-[#cebefa]/10 bg-transparent opacity-40 cursor-not-allowed'
+        }`}
+    >
+      <span className="text-[7px] uppercase tracking-widest text-[#cebefa]/50 font-mono">Guaranteed</span>
+      <span className="text-[10px] font-bold text-[#dfe3e1] leading-tight">{card.name}</span>
+      <span className="text-[8px] font-mono text-[#cebefa]/50">Q{card.quality} · Free</span>
+      {canPlay && <span className="text-[8px] text-[#cebefa]/60">↑ Play</span>}
+    </motion.button>
+  );
+}
+
+// Model in shared zone
+function SharedModelCard({ model, canActivate, onActivate }: {
+  model: { modelId: string; activatedThisTurn: boolean; placedByPlayer: PlayerId; activationsThisRound: number };
+  canActivate: boolean;
+  onActivate: () => void;
+}) {
+  const card = CMAP.get(model.modelId);
+  if (!card) return null;
+  return (
+    <motion.button
+      onClick={canActivate ? onActivate : undefined}
+      whileHover={canActivate ? { scale: 1.05, y: -2 } : {}}
+      whileTap={canActivate   ? { scale: 0.96 } : {}}
+      title={canActivate ? `Activate ${card.name} (${card.activateCost ?? 0}Cr)` : model.activatedThisTurn ? 'Already used this turn' : 'Cannot activate now'}
+      className={`flex flex-col items-center gap-1 rounded-xl border px-3 py-2 text-center min-w-[80px] transition-all
+        ${model.activatedThisTurn
+          ? 'border-[#cebefa]/8 bg-transparent opacity-25'
+          : canActivate
+            ? 'border-[#cebefa]/40 bg-[#cebefa]/8 hover:bg-[#cebefa]/14 cursor-pointer'
+            : 'border-[#cebefa]/15 bg-transparent opacity-40 cursor-not-allowed'
+        }`}
+    >
+      <span className="text-[8px] uppercase tracking-widest text-[#cebefa]/50 font-mono">Model</span>
+      <span className="text-[11px] font-bold text-[#dfe3e1] leading-tight">{card.name}</span>
+      <div className="flex items-center gap-1.5 text-[9px] font-mono text-[#c0c8c5]/50">
+        <span>Q{card.quality}</span>
+        <span className="opacity-40">·</span>
+        <span>{card.activateCost ?? 0}Cr</span>
+      </div>
+      {model.activationsThisRound > 0 && !model.activatedThisTurn && (
+        <span className="text-[7px] text-orange-400/60 font-mono">+1 RT (contention)</span>
+      )}
+      {model.activatedThisTurn && <span className="text-[8px] text-[#c0c8c5]/30 font-mono">Used</span>}
     </motion.button>
   );
 }
 
 // ─────────────────────────────────────────────────────────────
-// Shared model zone
+// Deck picker screen
 // ─────────────────────────────────────────────────────────────
 
-function SharedModelZone({ state, onActivate, playerCredits, isPlayerTurn }: {
-  state: GameState; onActivate: (modelId: string) => void;
-  playerCredits: number; isPlayerTurn: boolean;
-}) {
-  return (
-    <div className="flex flex-col gap-1 items-center">
-      <span className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/30 font-mono">— Shared Models —</span>
-      <div className="flex gap-2 flex-wrap justify-center min-h-[40px] items-center">
-        {state.sharedModels.length === 0 && (
-          <span className="text-[10px] text-[#c0c8c5]/20 italic">No models in play yet — play a model card from your hand</span>
-        )}
-        {state.sharedModels.map(m => {
-          const card = ALL_CARDS_MAP.get(m.modelId);
-          if (!card) return null;
-          const canActivate = isPlayerTurn
-            && !m.activatedThisTurn
-            && playerCredits >= (card.activateCost ?? 0)
-            && (state.round >= 2 || m.placedByPlayer === 'human');
-          return (
-            <motion.button
-              key={m.modelId}
-              onClick={canActivate ? () => onActivate(m.modelId) : undefined}
-              whileHover={canActivate ? { scale: 1.05 } : {}}
-              title={canActivate ? `Click to activate (${card.activateCost ?? 0}Cr)` : m.activatedThisTurn ? 'Already activated this turn' : 'Cannot activate'}
-              className={`px-2.5 py-1.5 rounded-lg border text-left transition-all
-                ${m.activatedThisTurn
-                  ? 'border-[#cebefa]/8 bg-transparent opacity-25'
-                  : canActivate
-                    ? 'border-[#cebefa]/40 bg-[#cebefa]/8 hover:bg-[#cebefa]/15 cursor-pointer'
-                    : 'border-[#cebefa]/15 bg-transparent opacity-40 cursor-not-allowed'
-                }`}
-            >
-              <div className="text-[8px] text-[#cebefa]/50 font-mono uppercase">model</div>
-              <div className="text-[11px] font-semibold text-[#dfe3e1]">{card.name}</div>
-              <div className="text-[9px] text-[#c0c8c5]/40 font-mono">Q{card.quality} · A{card.activateCost ?? 0}Cr</div>
-              {m.activatedThisTurn && <div className="text-[8px] text-orange-400/60">Used</div>}
-              {!m.activatedThisTurn && state.round === 1 && m.placedByPlayer === 'ai' && (
-                <div className="text-[8px] text-[#c0c8c5]/30">AI only (R1)</div>
-              )}
-            </motion.button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Deck picker
-// ─────────────────────────────────────────────────────────────
-
-function DeckPicker({ onStart }: {
-  onStart: (humanCreatorId: string, humanDeck: Card[], aiCreatorId: string, aiDeck: Card[], diff: Difficulty) => void;
+function DeckPickerScreen({ onStart }: {
+  onStart: (hCreator: string, hDeck: Card[], aCreator: string, aDeck: Card[], diff: Difficulty) => void;
 }) {
   const [chosen, setChosen] = useState<number | null>(null);
   const [diff, setDiff]     = useState<Difficulty>('medium');
 
-  function expandDeck(deckDef: typeof PREBUILT_DECKS[0]): Card[] {
-    const cards: Card[] = [];
-    // Include guaranteed models
-    for (const modelId of deckDef.guaranteedModels) {
-      const card = ALL_CARDS_MAP.get(modelId);
-      if (card) cards.push(card);
+  function expandDeck(d: typeof PREBUILT_DECKS[0]): Card[] {
+    const out: Card[] = [];
+    // Guaranteed models go in separately
+    for (const gid of d.guaranteedModels) {
+      const c = CMAP.get(gid);
+      if (c) out.push(c);
     }
-    // Include rest of deck cards (excluding creator)
-    for (const [cardId, count] of Object.entries(deckDef.cards)) {
-      const card = ALL_CARDS_MAP.get(cardId);
-      if (card && card.type !== 'creator') {
-        for (let i = 0; i < count; i++) cards.push(card);
-      }
+    for (const [id, count] of Object.entries(d.cards)) {
+      const c = CMAP.get(id);
+      if (c && c.type !== 'creator') for (let i = 0; i < count; i++) out.push(c);
     }
-    return cards;
+    return out;
   }
 
-  function handleStart() {
+  function go() {
     if (chosen === null) return;
-    const humanDeckDef = PREBUILT_DECKS[chosen];
-    const aiDeckDef    = PREBUILT_DECKS[chosen === 0 ? 1 : 0];
-
-    onStart(
-      humanDeckDef.creator,
-      expandDeck(humanDeckDef),
-      aiDeckDef.creator,
-      expandDeck(aiDeckDef),
-      diff
-    );
+    const hd = PREBUILT_DECKS[chosen];
+    const ad = PREBUILT_DECKS[chosen === 0 ? 1 : 0];
+    onStart(hd.creator, expandDeck(hd), ad.creator, expandDeck(ad), diff);
   }
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex flex-col items-center justify-center gap-8 py-12 animate-fade-in">
+    <div className="flex flex-col items-center justify-center gap-10 py-16 min-h-[calc(100vh-5rem)]">
       <div className="text-center">
-        <h1 className="text-3xl font-bold text-[#dfe3e1] mb-1">Choose Your Deck</h1>
-        <p className="text-[#c0c8c5]/40 text-sm">Pick a prebuilt deck to duel the AI opponent</p>
+        <div className="text-[10px] uppercase tracking-[0.25em] text-[#a1d0c6]/40 font-mono mb-2">Quick Duel</div>
+        <h1 className="text-4xl font-black text-[#dfe3e1] tracking-tight">Choose Your Deck</h1>
+        <p className="text-[#c0c8c5]/40 text-sm mt-2">You'll face the AI with the opposing deck</p>
       </div>
 
-      <div className="flex gap-4 flex-wrap justify-center">
+      <div className="flex gap-5 flex-wrap justify-center">
         {PREBUILT_DECKS.map((deck, i) => {
-          const creator = ALL_CARDS_MAP.get(deck.creator);
+          const creator = CMAP.get(deck.creator);
+          const isChosen = chosen === i;
           return (
             <motion.button
               key={deck.id}
               onClick={() => setChosen(i)}
-              whileHover={{ scale: 1.03, y: -4 }}
-              whileTap={{ scale: 0.97 }}
-              className={`w-64 text-left rounded-2xl border p-5 transition-all
-                ${chosen === i
-                  ? 'border-[#a1d0c6]/60 bg-[#a1d0c6]/8 shadow-[0_0_24px_rgba(161,208,198,0.2)]'
-                  : 'border-[#a1d0c6]/12 bg-[#1c2120]/50 hover:border-[#a1d0c6]/30'
+              whileHover={{ scale: 1.02, y: -5 }}
+              whileTap={{ scale: 0.98 }}
+              className={`relative w-72 text-left rounded-2xl border p-6 transition-all duration-200 overflow-hidden
+                ${isChosen
+                  ? 'border-[#a1d0c6]/50 bg-[#a1d0c6]/6 shadow-[0_8px_32px_rgba(161,208,198,0.15)]'
+                  : 'border-white/8 bg-[#1c2120]/60 hover:border-white/15'
                 }`}
             >
-              <span className="text-[9px] uppercase tracking-widest text-[#a1d0c6]/50 font-mono">Deck {i + 1}</span>
-              <h3 className="text-base font-bold text-[#dfe3e1] mt-0.5 leading-tight">{deck.name}</h3>
-              <p className="text-[11px] text-[#c0c8c5]/50 mt-2 mb-3 leading-relaxed">{deck.description}</p>
+              {/* Decorative corner */}
+              <div className={`absolute top-0 right-0 w-24 h-24 rounded-bl-full transition-all ${isChosen ? 'bg-[#a1d0c6]/6' : 'bg-white/3'}`} />
+              <div className="text-[9px] uppercase tracking-[0.2em] font-mono text-[#a1d0c6]/40 mb-1">Deck {i + 1}</div>
+              <h2 className="text-lg font-black text-[#dfe3e1] leading-tight">{deck.name.split('—')[0].trim()}</h2>
+              <p className="text-[11px] text-[#c0c8c5]/50 leading-relaxed mt-2 mb-4">{deck.description}</p>
               {creator && (
-                <div className="flex items-center gap-2 pt-2 border-t border-[#a1d0c6]/8">
-                  <span className="text-[9px] text-[#c0c8c5]/35 font-mono">Creator:</span>
-                  <span className="text-[11px] font-semibold text-[#a1d0c6]">{creator.name}</span>
-                  <span className="text-[9px] text-[#c0c8c5]/30 ml-auto font-mono">♥{creator.loyalty}</span>
+                <div className="flex items-center gap-2 py-2 border-t border-white/6">
+                  <span className="text-[9px] text-[#c0c8c5]/30 font-mono">CREATOR</span>
+                  <span className="text-[11px] font-bold text-[#a1d0c6]">{creator.name}</span>
+                  <span className="ml-auto text-[9px] font-mono text-[#c0c8c5]/30">♥{creator.loyalty}</span>
                 </div>
               )}
               <div className="flex gap-1 mt-2 flex-wrap">
                 {deck.archetypes.map(a => (
-                  <span key={a} className="text-[8px] px-1.5 py-0.5 rounded bg-[#a1d0c6]/8 text-[#a1d0c6]/60 font-mono">{a}</span>
+                  <span key={a} className="text-[8px] px-2 py-0.5 rounded-full border border-white/10 text-[#c0c8c5]/40 font-mono">{a}</span>
                 ))}
+                <span className={`text-[8px] px-2 py-0.5 rounded-full font-mono ml-auto ${
+                  deck.difficulty === 'Beginner' ? 'text-[#6fcf97] border border-[#6fcf97]/30'
+                  : deck.difficulty === 'Intermediate' ? 'text-yellow-400 border border-yellow-400/30'
+                  : 'text-red-400 border border-red-400/30'
+                }`}>{deck.difficulty}</span>
               </div>
-              <span className={`text-[9px] font-mono mt-2 inline-block ${
-                deck.difficulty === 'Beginner' ? 'text-[#4a9a6e]'
-                : deck.difficulty === 'Intermediate' ? 'text-yellow-400'
-                : 'text-red-400'
-              }`}>{deck.difficulty}</span>
+              {isChosen && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                  className="absolute top-4 right-4 w-5 h-5 rounded-full bg-[#a1d0c6] flex items-center justify-center text-[#0d1211] text-[10px] font-black"
+                >✓</motion.div>
+              )}
             </motion.button>
           );
         })}
       </div>
 
-      <div className="flex flex-col items-center gap-2">
-        <span className="text-[10px] uppercase tracking-widest text-[#c0c8c5]/40 font-mono">AI Difficulty</span>
-        <div className="flex gap-2">
+      <div className="flex flex-col items-center gap-3">
+        <div className="text-[9px] uppercase tracking-widest text-[#c0c8c5]/35 font-mono">AI Difficulty</div>
+        <div className="flex gap-2 p-1 rounded-xl border border-white/8 bg-[#1c2120]/40">
           {(['easy', 'medium', 'hard'] as Difficulty[]).map(d => (
             <button key={d} onClick={() => setDiff(d)}
-              className={`px-3 py-1 rounded-lg text-[11px] font-mono border transition-all
-                ${diff === d
-                  ? 'border-[#a1d0c6]/50 bg-[#a1d0c6]/12 text-[#a1d0c6]'
-                  : 'border-[#a1d0c6]/10 text-[#c0c8c5]/30 hover:border-[#a1d0c6]/25'
-                }`}
+              className={`px-4 py-1.5 rounded-lg text-[11px] font-bold font-mono transition-all
+                ${diff === d ? 'bg-[#a1d0c6] text-[#0d1211]' : 'text-[#c0c8c5]/40 hover:text-[#c0c8c5]/70'}`}
             >{d}</button>
           ))}
         </div>
       </div>
 
       <motion.button
-        onClick={handleStart}
+        onClick={go}
         disabled={chosen === null}
         whileHover={chosen !== null ? { scale: 1.04, y: -2 } : {}}
         whileTap={chosen !== null   ? { scale: 0.97 } : {}}
-        className={`px-8 py-3 rounded-xl font-bold text-sm transition-all
+        className={`px-10 py-3.5 rounded-2xl font-black text-sm tracking-wide transition-all
           ${chosen !== null
-            ? 'bg-[#a1d0c6] text-[#0d1211] shadow-[0_0_20px_rgba(161,208,198,0.35)] hover:bg-[#b5dbd4]'
-            : 'bg-[#a1d0c6]/10 text-[#a1d0c6]/30 cursor-not-allowed'
+            ? 'bg-[#a1d0c6] text-[#0d1211] shadow-[0_4px_24px_rgba(161,208,198,0.3)]'
+            : 'bg-white/5 text-white/20 cursor-not-allowed'
           }`}
       >
-        {chosen !== null ? `Play as ${PREBUILT_DECKS[chosen]?.name.split('—')[0].trim()}` : 'Select a deck first'}
+        {chosen !== null ? `Play as ${PREBUILT_DECKS[chosen]?.name.split('—')[0].trim().split(' — ')[0].trim()} →` : 'Select a deck to continue'}
       </motion.button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Mulligan screen
+// ─────────────────────────────────────────────────────────────
+
+function MulliganScreen({ state, onMulligan, onKeep }: {
+  state: GameState;
+  onMulligan: () => void;
+  onKeep: () => void;
+}) {
+  const p = state.human;
+  const creatorCard = CMAP.get(p.creator.cardId);
+  const done = state.mulliganPhase.humanDone;
+
+  return (
+    <div className="flex flex-col items-center justify-center gap-8 py-16 min-h-[calc(100vh-5rem)]">
+      <div className="text-center">
+        <div className="text-[10px] uppercase tracking-[0.25em] text-[#a1d0c6]/40 font-mono mb-2">Game Setup</div>
+        <h1 className="text-3xl font-black text-[#dfe3e1]">Opening Hand</h1>
+        {creatorCard && (
+          <p className="text-[#c0c8c5]/40 text-sm mt-1">Playing as <span className="text-[#a1d0c6]">{creatorCard.name}</span></p>
+        )}
+      </div>
+
+      {/* Guaranteed models */}
+      <div className="flex flex-col items-center gap-2">
+        <div className="text-[9px] uppercase tracking-widest text-[#cebefa]/40 font-mono">Guaranteed Models (set aside)</div>
+        <div className="flex gap-3">
+          {p.guaranteedModels.map(c => (
+            <div key={c.id} className="px-4 py-2.5 rounded-xl border border-[#cebefa]/25 bg-[#cebefa]/5 text-center">
+              <div className="text-[8px] text-[#cebefa]/40 font-mono uppercase">Model</div>
+              <div className="text-[12px] font-bold text-[#dfe3e1]">{c.name}</div>
+              <div className="text-[9px] text-[#c0c8c5]/40 font-mono">Q{c.quality} · A{c.activateCost}Cr</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Opening hand */}
+      <div className="flex flex-col items-center gap-3">
+        <div className="text-[9px] uppercase tracking-widest text-[#c0c8c5]/40 font-mono">
+          Your Opening Hand ({p.hand.length} cards)
+        </div>
+        <div className="flex gap-2 flex-wrap justify-center max-w-xl">
+          {p.hand.map((card, i) => (
+            <motion.div
+              key={card.id + i}
+              initial={{ opacity: 0, y: 20, rotateZ: Math.random() * 6 - 3 }}
+              animate={{ opacity: 1, y: 0,  rotateZ: 0 }}
+              transition={{ delay: i * 0.06, type: 'spring', stiffness: 280, damping: 22 }}
+              className={`flex flex-col gap-0.5 px-3 py-2 rounded-xl border w-24 text-left
+                border-white/10 bg-[#1c2120]/70`}
+            >
+              <div className="text-[7px] uppercase font-mono tracking-widest" style={{ color: TYPE_COLOR[card.type] + '99' }}>{card.type}</div>
+              <div className="text-[11px] font-bold text-[#dfe3e1] leading-tight line-clamp-2">{card.name}</div>
+              {card.type === 'model' && <div className="text-[8px] text-[#cebefa]/50 font-mono">Q{card.quality}</div>}
+              {card.cost !== undefined && <div className="text-[8px] text-[#c0c8c5]/40 font-mono">{card.cost}{card.costType === 'reputation' ? 'R' : 'Cr'}</div>}
+            </motion.div>
+          ))}
+        </div>
+      </div>
+
+      {!done ? (
+        <div className="flex flex-col items-center gap-3">
+          <p className="text-[#c0c8c5]/50 text-sm text-center max-w-sm">
+            You may mulligan once — shuffle your hand back and draw 6 cards instead.<br/>
+            <span className="text-[#c0c8c5]/30 text-xs">If only you mulligan, the AI gains +2 Credits. If only the AI mulligans, you gain +2 Credits.</span>
+          </p>
+          <div className="flex gap-3">
+            <motion.button
+              onClick={onMulligan}
+              whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}
+              className="px-6 py-2.5 rounded-xl border border-[#c0c8c5]/20 text-[#c0c8c5]/70 text-sm font-bold hover:border-[#c0c8c5]/40 hover:text-[#c0c8c5] transition-all"
+            >Mulligan (draw 6)</motion.button>
+            <motion.button
+              onClick={onKeep}
+              whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}
+              className="px-8 py-2.5 rounded-xl bg-[#a1d0c6] text-[#0d1211] text-sm font-black shadow-[0_4px_16px_rgba(161,208,198,0.25)]"
+            >Keep Hand →</motion.button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-2">
+          <div className="px-4 py-2 rounded-xl border border-[#a1d0c6]/30 bg-[#a1d0c6]/8 text-[#a1d0c6] text-sm font-bold">
+            ✓ Hand confirmed — waiting for AI…
+          </div>
+          <motion.div animate={{ opacity: [0.3, 0.8, 0.3] }} transition={{ repeat: Infinity, duration: 1.5 }}
+            className="text-[11px] text-[#c0c8c5]/30 font-mono"
+          >AI is deciding…</motion.div>
+        </div>
+      )}
     </div>
   );
 }
@@ -389,191 +434,182 @@ function DeckPicker({ onStart }: {
 // Game over
 // ─────────────────────────────────────────────────────────────
 
-function GameOver({ winner, onRematch }: { winner: PlayerId | 'draw' | null; onRematch: () => void }) {
+function GameOverScreen({ winner, onRematch }: { winner: PlayerId | 'draw' | null; onRematch: () => void }) {
   return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-      className="fixed inset-0 bg-[#0d1211]/92 flex items-center justify-center z-50 backdrop-blur-sm"
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+      className="fixed inset-0 bg-[#0d1211]/95 backdrop-blur-sm flex items-center justify-center z-50"
     >
-      <div className="text-center space-y-4">
-        <motion.h1
-          initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.15 }}
-          className={`text-5xl font-black ${
-            winner === 'human' ? 'text-[#a1d0c6]' : winner === 'ai' ? 'text-red-400' : 'text-[#cebefa]'
-          }`}
-        >
-          {winner === 'human' ? '✦ You Win!' : winner === 'ai' ? 'AI Wins' : 'Draw'}
-        </motion.h1>
-        <p className="text-[#c0c8c5]/50 text-sm">
-          {winner === 'human' ? 'The AI couldn\'t keep up.' : winner === 'ai' ? 'The heuristic outplayed you.' : 'Simultaneous elimination.'}
+      <motion.div initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: 'spring', stiffness: 240, damping: 22, delay: 0.1 }}
+        className="text-center space-y-5 px-8"
+      >
+        <div className={`text-7xl font-black tracking-tighter ${winner === 'human' ? 'text-[#a1d0c6]' : winner === 'ai' ? 'text-red-400' : 'text-[#cebefa]'}`}>
+          {winner === 'human' ? 'You Win' : winner === 'ai' ? 'AI Wins' : 'Draw'}
+        </div>
+        <p className="text-[#c0c8c5]/40">
+          {winner === 'human' ? 'Beautifully played.' : winner === 'ai' ? 'The heuristic got the better of you this time.' : 'Both creators fell simultaneously.'}
         </p>
         <button onClick={onRematch}
-          className="mt-4 px-6 py-2.5 rounded-xl bg-[#a1d0c6] text-[#0d1211] font-bold text-sm hover:bg-[#b5dbd4] transition-colors"
-        >
-          Play Again
-        </button>
-      </div>
+          className="px-8 py-3 rounded-xl bg-[#a1d0c6] text-[#0d1211] font-black text-sm hover:bg-[#b5dbd4] transition-colors"
+        >Play Again</button>
+      </motion.div>
     </motion.div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────
-// Main component
+// Main game board
 // ─────────────────────────────────────────────────────────────
 
-type UIMode = 'idle' | 'select_target_ability' | 'await_model_for_prompts';
+type UIMode = 'idle' | 'awaiting_target' | 'prompts_selected';
 
 export default function ArenaBattlefield() {
-  const [gameStarted, setGameStarted] = useState(false);
-  const [state, dispatch]  = useReducer(
-    (s: GameState, a: GameAction) => gameReducer(s, a, ALL_CARDS_MAP),
-    INITIAL_STATE
-  );
-  const [difficulty, setDifficulty]   = useState<Difficulty>('medium');
-  const [uiMode, setUiMode]           = useState<UIMode>('idle');
+  const [started, setStarted]   = useState(false);
+  const [difficulty, setDiff]   = useState<Difficulty>('medium');
+  const [state, dispatch]       = useReducer((s: GameState, a: GameAction) => gameReducer(s, a, CMAP), BLANK);
+  const [uiMode, setUIMode]     = useState<UIMode>('idle');
   const [pendingAbility, setPendingAbility] = useState<number | 'signature' | null>(null);
-  const [selectedPromptIds, setSelectedPromptIds] = useState<string[]>([]);
-  const [pendingModelId, setPendingModelId]       = useState<string | null>(null);
-  const [aiThinking, setAiThinking]   = useState(false);
-  const [message, setMessage]         = useState('');
-  const logRef  = useRef<HTMLDivElement>(null);
-  const aiRunning = useRef(false);
+  const [selectedPrompts, setSelectedPrompts] = useState<string[]>([]);
+  const [msg, setMsg]           = useState('');
+  const logRef                  = useRef<HTMLDivElement>(null);
+  const aiRunning               = useRef(false);
 
-  // ── Flash helper ─────────────────────────────────────────────
-  function flash(msg: string) {
-    setMessage(msg);
-    setTimeout(() => setMessage(m => m === msg ? '' : m), 2400);
+  function flash(m: string, duration = 2500) {
+    setMsg(m);
+    setTimeout(() => setMsg(x => x === m ? '' : x), duration);
   }
 
-  // ── Start game ───────────────────────────────────────────────
-  function startGame(humanCreatorId: string, humanDeck: Card[], aiCreatorId: string, aiDeck: Card[], diff: Difficulty) {
-    setDifficulty(diff);
-    setGameStarted(true);
-    setUiMode('idle');
-    setSelectedPromptIds([]);
-    setPendingModelId(null);
-    setPendingAbility(null);
-    aiRunning.current = false;
-    const firstPlayer: PlayerId = Math.random() < 0.5 ? 'human' : 'ai';
-    dispatch({ type: 'START_GAME', humanCreatorId, humanDeck, aiCreatorId, aiDeck, firstPlayer });
-  }
-
-  // ── AI turn ──────────────────────────────────────────────────
+  // ── AI mulligan (instant) + AI turns ─────────────────────────
   useEffect(() => {
-    if (!gameStarted) return;
+    if (!started) return;
     if (state.phase === 'game_over') return;
-    if (state.activePlayer !== 'ai') return;
+
+    // AI mulligan: always keeps
+    if (state.phase === 'mulligan' && !state.mulliganPhase.aiDone) {
+      const timer = setTimeout(() => {
+        dispatch({ type: 'KEEP_HAND', player: 'ai' });
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+
+    // AI main phase
+    if (state.phase !== 'main' || state.activePlayer !== 'ai') return;
     if (aiRunning.current) return;
 
     aiRunning.current = true;
-    setAiThinking(true);
-    const ai = createAI(difficulty);
-
-    // Capture state snapshot for this turn
+    const ai   = createAI(difficulty);
     const snap = state;
 
     (async () => {
       try {
-        await sleep(700);
+        await sleep(500);
         const plan = ai.planFullTurn(snap, ALL_CARDS);
-
         for (const action of plan) {
-          await sleep(600 + Math.random() * 400);
-
-          // Map AI engine action → GameAction (add player field)
-          let gameAction: GameAction | null = null;
+          await sleep(550 + Math.random() * 350);
+          let ga: GameAction | null = null;
           switch (action.type) {
-            case 'PLAY_MODEL':
-              if (action.cardId) gameAction = { type: 'PLAY_MODEL', player: 'ai', cardId: action.cardId };
+            case 'PLAY_MODEL': {
+              // Check if it's a guaranteed model (still in guaranteedModels list)
+              const isGuaranteed = snap.ai.guaranteedModels?.some(c => c.id === action.cardId);
+              ga = isGuaranteed
+                ? { type: 'PLAY_GUARANTEED_MODEL', player: 'ai', cardId: action.cardId! }
+                : { type: 'PLAY_MODEL',             player: 'ai', cardId: action.cardId! };
               break;
-            case 'ACTIVATE_MODEL':
-              if (action.cardId) gameAction = { type: 'ACTIVATE_MODEL', player: 'ai', modelId: action.cardId, promptIds: action.promptIds ?? [] };
-              break;
-            case 'USE_CREATOR_ABILITY':
-              if (action.abilityNum !== undefined) gameAction = { type: 'USE_CREATOR_ABILITY', player: 'ai', abilityNum: action.abilityNum };
-              break;
-            case 'PLAY_MODIFIER':
-              if (action.cardId) gameAction = { type: 'PLAY_MODIFIER', player: 'ai', cardId: action.cardId, targetId: action.targetId ?? 'creator' };
-              break;
-            case 'PLAY_ARTIFACT':
-              if (action.cardId) gameAction = { type: 'PLAY_ARTIFACT', player: 'ai', cardId: action.cardId };
-              break;
-            case 'PLAY_EVENT':
-              if (action.cardId) gameAction = { type: 'PLAY_EVENT', player: 'ai', cardId: action.cardId };
-              break;
-            case 'END_TURN':
-              gameAction = { type: 'END_TURN', player: 'ai' };
-              break;
+            }
+            case 'ACTIVATE_MODEL':       ga = { type: 'ACTIVATE_MODEL',       player: 'ai', modelId: action.cardId!, promptIds: action.promptIds ?? [] }; break;
+            case 'USE_CREATOR_ABILITY':  ga = { type: 'USE_CREATOR_ABILITY',  player: 'ai', abilityNum: action.abilityNum! }; break;
+            case 'PLAY_MODIFIER':        ga = { type: 'PLAY_MODIFIER',        player: 'ai', cardId: action.cardId!, targetId: action.targetId ?? 'creator' }; break;
+            case 'PLAY_ARTIFACT':        ga = { type: 'PLAY_ARTIFACT',        player: 'ai', cardId: action.cardId! }; break;
+            case 'PLAY_EVENT':           ga = { type: 'PLAY_EVENT',           player: 'ai', cardId: action.cardId! }; break;
+            case 'END_TURN':             ga = { type: 'END_TURN',             player: 'ai' }; break;
           }
-          if (gameAction) dispatch(gameAction);
+          if (ga) dispatch(ga);
           if (action.type === 'END_TURN') break;
         }
-
-        // Safety: always end turn
         await sleep(300);
         dispatch({ type: 'END_TURN', player: 'ai' });
       } finally {
         aiRunning.current = false;
-        setAiThinking(false);
       }
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameStarted, state.activePlayer, state.turn, state.phase]);
+  }, [started, state.phase, state.activePlayer, state.turn, state.mulliganPhase.aiDone]);
 
-  // ── Log scroll ───────────────────────────────────────────────
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = 0;
-  }, [state.log.length]);
+  // Log scroll
+  useEffect(() => { if (logRef.current) logRef.current.scrollTop = 0; }, [state.log.length]);
 
-  // ── Not started yet ──────────────────────────────────────────
-  if (!gameStarted) {
-    return <DeckPicker onStart={startGame} />;
+  // ── Not started ───────────────────────────────────────────────
+  if (!started) {
+    return (
+      <DeckPickerScreen onStart={(hc, hd, ac, ad, diff) => {
+        setDiff(diff);
+        setStarted(true);
+        aiRunning.current = false;
+        const fp: PlayerId = Math.random() < 0.5 ? 'human' : 'ai';
+        dispatch({ type: 'START_GAME', humanCreatorId: hc, humanDeck: hd, aiCreatorId: ac, aiDeck: ad, firstPlayer: fp });
+      }} />
+    );
+  }
+
+  // ── Mulligan phase ────────────────────────────────────────────
+  if (state.phase === 'mulligan') {
+    return (
+      <MulliganScreen
+        state={state}
+        onMulligan={() => dispatch({ type: 'MULLIGAN',    player: 'human' })}
+        onKeep={    () => dispatch({ type: 'KEEP_HAND',   player: 'human' })}
+      />
+    );
   }
 
   // ─────────────────────────────────────────────────────────────
-  const isPlayerTurn = state.activePlayer === 'human' && state.phase === 'main';
-  const humanCreatorCard = ALL_CARDS_MAP.get(state.human.creator.cardId);
-  const aiCreatorCard    = ALL_CARDS_MAP.get(state.ai.creator.cardId);
+  // Game board
+  // ─────────────────────────────────────────────────────────────
 
-  // ── Interaction handlers ─────────────────────────────────────
+  const isMyTurn    = state.activePlayer === 'human' && state.phase === 'main';
+  const humanP      = state.human;
+  const aiP         = state.ai;
+  const hCreatorCard = CMAP.get(humanP.creator.cardId);
+  const aCreatorCard = CMAP.get(aiP.creator.cardId);
+  const aiThinking  = state.activePlayer === 'ai' && state.phase === 'main';
 
-  function handleHandCardClick(card: Card) {
-    if (!isPlayerTurn) { flash("It's not your turn"); return; }
-    const p = state.human;
+  function endTurn() {
+    if (!isMyTurn) { flash("It's not your turn yet"); return; }
+    setUIMode('idle'); setSelectedPrompts([]);
+    dispatch({ type: 'END_TURN', player: 'human' });
+  }
+
+  function handleHandCard(card: Card) {
+    if (!isMyTurn) { flash("Wait for your turn"); return; }
+    const p = humanP;
 
     if (card.type === 'model') {
-      if (p.credits < (card.playCost ?? 0)) { flash(`Need ${card.playCost}Cr — you have ${p.credits}Cr`); return; }
+      if (p.credits < (card.playCost ?? 0)) { flash(`Need ${card.playCost}Cr (you have ${p.credits}Cr)`); return; }
       dispatch({ type: 'PLAY_MODEL', player: 'human', cardId: card.id });
       flash(`${card.name} placed in shared zone`);
       return;
     }
-
     if (card.type === 'prompt') {
-      // Toggle prompt selection, then wait for model click
-      setSelectedPromptIds(prev =>
-        prev.includes(card.id) ? prev.filter(x => x !== card.id) : [...prev.slice(-1), card.id]
-      );
-      setUiMode('await_model_for_prompts');
-      flash('Prompt selected — now click a model in the shared zone to activate it');
+      const toggled = selectedPrompts.includes(card.id)
+        ? selectedPrompts.filter(x => x !== card.id)
+        : [...selectedPrompts.slice(-1), card.id];
+      setSelectedPrompts(toggled);
+      setUIMode(toggled.length > 0 ? 'prompts_selected' : 'idle');
+      flash(toggled.length > 0 ? `${toggled.length} prompt(s) selected — click a model to activate` : 'Prompt deselected');
       return;
     }
-
     if (card.type === 'modifier') {
       if (p.credits < (card.cost ?? 0)) { flash(`Need ${card.cost}Cr`); return; }
       dispatch({ type: 'PLAY_MODIFIER', player: 'human', cardId: card.id, targetId: 'creator' });
-      flash(`${card.name} attached to creator`);
+      flash(`${card.name} attached`);
       return;
     }
-
     if (card.type === 'artifact') {
       if (p.credits < (card.cost ?? 0)) { flash(`Need ${card.cost}Cr`); return; }
       dispatch({ type: 'PLAY_ARTIFACT', player: 'human', cardId: card.id });
-      flash(`${card.name} placed in artifact zone`);
+      flash(`${card.name} placed`);
       return;
     }
-
     if (card.type === 'event') {
-      if (state.round < 2) { flash('No events in Round 1'); return; }
+      if (state.round < 2) { flash('Events can\'t be played in Round 1'); return; }
       if (p.credits < (card.cost ?? 0)) { flash(`Need ${card.cost}Cr`); return; }
       dispatch({ type: 'PLAY_EVENT', player: 'human', cardId: card.id });
       flash(`${card.name} resolved`);
@@ -581,300 +617,294 @@ export default function ArenaBattlefield() {
     }
   }
 
-  function handleModelClick(modelId: string) {
-    if (!isPlayerTurn) return;
-    // Use selected prompts (if any)
-    const promptIds = selectedPromptIds.filter(id => state.human.hand.some(c => c.id === id));
-    dispatch({ type: 'ACTIVATE_MODEL', player: 'human', modelId, promptIds });
-    setSelectedPromptIds([]);
-    setPendingModelId(null);
-    setUiMode('idle');
+  function handleModelActivate(modelId: string) {
+    if (!isMyTurn) return;
+    dispatch({ type: 'ACTIVATE_MODEL', player: 'human', modelId, promptIds: selectedPrompts });
+    setSelectedPrompts([]); setUIMode('idle');
     flash('Model activated — creation queued!');
   }
 
-  function handleAbilitySelect(abilityNum: number | 'signature') {
-    if (!isPlayerTurn) return;
-    if (!humanCreatorCard) return;
-    // Abilities that need a target
-    if (abilityNum === 1 && humanCreatorCard.id === 'C-001') {
-      setPendingAbility(abilityNum);
-      setUiMode('select_target_ability');
-      flash('Select an opponent creation to Overrender');
-      return;
+  function handleAbility(num: number | 'signature') {
+    if (!isMyTurn || !hCreatorCard) return;
+    // Abilities needing targets
+    if (num === 1 && hCreatorCard.id === 'C-001') {
+      if (aiP.field.length === 0) { flash('No opponent creations to target'); return; }
+      setPendingAbility(num); setUIMode('awaiting_target');
+      flash('Click an opponent creation to Overrender'); return;
     }
-    if (abilityNum === 2 && humanCreatorCard.id === 'C-001') {
-      // Need to select own CLIP-LOCKed creation
-      const locked = state.human.field.filter(c => c.clipLocked);
-      if (locked.length === 0) { flash('No CLIP-LOCKed creations'); return; }
-      // Auto-select first if only one
-      dispatch({ type: 'USE_CREATOR_ABILITY', player: 'human', abilityNum, targetId: locked[0].instanceId });
-      flash('Positive Feedback resolved!');
-      return;
+    if (num === 2 && hCreatorCard.id === 'C-001') {
+      const locked = humanP.field.filter(c => c.clipLocked);
+      if (!locked.length) { flash('No CLIP-LOCKed creations'); return; }
+      dispatch({ type: 'USE_CREATOR_ABILITY', player: 'human', abilityNum: num, targetId: locked[0].instanceId });
+      flash('Positive Feedback!'); return;
     }
-    if (abilityNum === 3 && humanCreatorCard.id === 'C-001') {
-      // Target own creation for Iridescent Shift
-      const field = state.human.field;
-      if (field.length === 0) { flash('No creations on field'); return; }
-      dispatch({ type: 'USE_CREATOR_ABILITY', player: 'human', abilityNum, targetId: field[0].instanceId });
-      flash('Iridescent Shift applied!');
-      return;
+    if (num === 3 && hCreatorCard.id === 'C-001') {
+      if (!humanP.field.length) { flash('No creations on field'); return; }
+      const target = humanP.field.reduce((best, c) => c.visibility > best.visibility ? c : best, humanP.field[0]);
+      dispatch({ type: 'USE_CREATOR_ABILITY', player: 'human', abilityNum: num, targetId: target.instanceId });
+      flash('Iridescent Shift applied!'); return;
     }
-    dispatch({ type: 'USE_CREATOR_ABILITY', player: 'human', abilityNum });
+    dispatch({ type: 'USE_CREATOR_ABILITY', player: 'human', abilityNum: num });
     flash('Ability used!');
   }
 
-  function handleCreationClick(creation: Creation, owner: PlayerId) {
-    if (uiMode === 'select_target_ability' && owner === 'ai') {
-      dispatch({ type: 'USE_CREATOR_ABILITY', player: 'human', abilityNum: pendingAbility!, targetId: creation.instanceId });
-      setUiMode('idle');
-      setPendingAbility(null);
-      flash('Ability resolved!');
-      return;
+  function handleCreationClick(c: Creation, owner: PlayerId) {
+    if (uiMode === 'awaiting_target' && owner === 'ai') {
+      dispatch({ type: 'USE_CREATOR_ABILITY', player: 'human', abilityNum: pendingAbility!, targetId: c.instanceId });
+      setUIMode('idle'); setPendingAbility(null); flash('Ability resolved!'); return;
     }
-    // Clicking own Coherent creation → apply CLIP-LOCK (Aia only)
-    if (owner === 'human' && isPlayerTurn && humanCreatorCard?.id === 'C-001') {
-      if (!creation.clipLocked && creation.sourceModelId === 'M-001') {
-        dispatch({ type: 'APPLY_CLIP_LOCK', player: 'human', creationId: creation.instanceId });
-        flash('CLIP-LOCK applied');
-      }
+    if (owner === 'human' && isMyTurn && hCreatorCard?.id === 'C-001' && !c.clipLocked && c.sourceModelId === 'M-001' && c.runtimeLeft === 0) {
+      dispatch({ type: 'APPLY_CLIP_LOCK', player: 'human', creationId: c.instanceId });
+      flash('CLIP-LOCK applied');
     }
   }
 
-  function handleEndTurn() {
-    if (!isPlayerTurn) { flash("Wait for your turn"); return; }
-    setSelectedPromptIds([]);
-    setPendingModelId(null);
-    setUiMode('idle');
-    dispatch({ type: 'END_TURN', player: 'human' });
-  }
-
-  function handleCancelMode() {
-    setUiMode('idle');
-    setPendingAbility(null);
-    setSelectedPromptIds([]);
-    setPendingModelId(null);
-  }
+  function cancelMode() { setUIMode('idle'); setPendingAbility(null); setSelectedPrompts([]); }
 
   // ─────────────────────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────────────────────
-
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex flex-col gap-0 py-4 relative">
+    <div className="flex flex-col gap-0 py-3 min-h-[calc(100vh-5rem)] relative">
 
       <AnimatePresence>
         {state.phase === 'game_over' && (
-          <GameOver winner={state.winner} onRematch={() => { setGameStarted(false); }} />
+          <GameOverScreen winner={state.winner} onRematch={() => { setStarted(false); aiRunning.current = false; }} />
         )}
       </AnimatePresence>
 
-      {/* Flash */}
+      {/* Flash message */}
       <AnimatePresence>
-        {message && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
-            className="fixed top-20 left-1/2 -translate-x-1/2 z-40 bg-[#1c2120] border border-[#a1d0c6]/30 text-[#dfe3e1] text-[12px] px-4 py-2 rounded-full shadow-lg font-mono pointer-events-none"
-          >
-            {message}
-          </motion.div>
+        {msg && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="fixed top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none px-4 py-2 rounded-full bg-[#1c2120]/95 border border-[#a1d0c6]/25 text-[#dfe3e1] text-[11px] font-mono shadow-lg"
+          >{msg}</motion.div>
         )}
       </AnimatePresence>
 
-      {/* Turn header */}
-      <div className="flex items-center justify-between px-2 mb-3">
-        <span className="text-[10px] font-mono text-[#c0c8c5]/40 uppercase tracking-widest">
-          Round {state.round} · Turn {state.turn}
+      {/* ── Turn bar ─────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 px-3 mb-3 pb-2 border-b border-white/6">
+        <span className="text-[9px] font-mono uppercase tracking-widest text-[#c0c8c5]/30">
+          R{state.round} · T{state.turn}
         </span>
-        <span className={`text-[11px] font-mono font-bold px-3 py-1 rounded-full border
-          ${state.activePlayer === 'human'
-            ? 'border-[#a1d0c6]/40 text-[#a1d0c6] bg-[#a1d0c6]/8'
-            : 'border-[#cebefa]/30 text-[#cebefa] bg-[#cebefa]/6'
+        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border transition-all
+          ${isMyTurn
+            ? 'border-[#a1d0c6]/40 bg-[#a1d0c6]/8 text-[#a1d0c6]'
+            : 'border-[#cebefa]/20 bg-[#cebefa]/5 text-[#cebefa]/70'
           }`}
         >
-          {state.activePlayer === 'human' ? '▶ Your Turn' : aiThinking ? '⏳ AI is thinking…' : '● AI Turn'}
-        </span>
-        <span className="text-[10px] font-mono text-[#c0c8c5]/40">
-          {state.human.deck.length} cards left
-        </span>
-      </div>
-
-      {/* ── AI zone ── */}
-      <div className="flex flex-col gap-2 px-2 pb-3 border-b border-[#a1d0c6]/8">
-        {aiCreatorCard && (
-          <CreatorBar
-            label="AI" loyalty={state.ai.creator.loyalty} maxLoyalty={aiCreatorCard.loyalty ?? 10}
-            rep={state.ai.creator.reputation} credits={state.ai.credits}
-            isActive={state.activePlayer === 'ai'} isExhausted={state.ai.creator.isExhausted}
-          />
+          <span className={`w-1.5 h-1.5 rounded-full ${isMyTurn ? 'bg-[#a1d0c6]' : 'bg-[#cebefa]/50'}`} />
+          {isMyTurn ? 'Your Turn' : aiThinking ? 'AI thinking…' : 'AI Turn'}
+        </div>
+        {uiMode !== 'idle' && (
+          <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+            className="flex items-center gap-2 px-3 py-1 rounded-full border border-yellow-400/30 bg-yellow-400/6 text-yellow-300 text-[10px] font-mono"
+          >
+            {uiMode === 'awaiting_target' ? '🎯 Select target' : `📝 ${selectedPrompts.length} prompt(s) selected — click a model`}
+            <button onClick={cancelMode} className="text-yellow-400/50 hover:text-yellow-400 transition-colors">✕</button>
+          </motion.div>
         )}
-        <div className="flex items-start gap-3">
-          <div className="w-16 shrink-0 rounded-lg border border-[#cebefa]/12 bg-[#1c2120]/50 p-1.5 text-center">
-            <div className="text-[8px] text-[#c0c8c5]/25 uppercase font-mono">AI</div>
-            <div className="text-[10px] font-bold text-[#dfe3e1] leading-tight">{aiCreatorCard?.name ?? '—'}</div>
-            <div className="text-[9px] text-[#cebefa] mt-0.5">♥{state.ai.creator.loyalty}</div>
-            <div className="text-[8px] text-[#c0c8c5]/25 font-mono mt-0.5">{state.ai.hand.length} cards</div>
-          </div>
-          <div className="flex gap-2 flex-wrap min-h-[80px] items-center flex-1">
-            <AnimatePresence>
-              {[...state.ai.field, ...state.ai.queue].map(c => (
-                <CreationToken key={c.instanceId} creation={c} isOwn={false}
-                  highlight={uiMode === 'select_target_ability' && c.runtimeLeft === 0 ? 'target' : undefined}
-                  onClick={() => handleCreationClick(c, 'ai')}
-                />
-              ))}
-            </AnimatePresence>
-            {state.ai.field.length === 0 && state.ai.queue.length === 0 && (
-              <span className="text-[10px] text-[#c0c8c5]/15 italic">No AI creations</span>
-            )}
-          </div>
+        <div className="ml-auto flex items-center gap-3 text-[10px] font-mono text-[#c0c8c5]/35">
+          <span>{humanP.deck.length}🂠</span>
+          <span>{humanP.credits}Cr</span>
         </div>
       </div>
 
-      {/* ── Shared zone ── */}
-      <div className="py-3 px-2 border-b border-[#a1d0c6]/8">
-        <SharedModelZone
-          state={state}
-          onActivate={handleModelClick}
-          playerCredits={state.human.credits}
-          isPlayerTurn={isPlayerTurn || uiMode === 'await_model_for_prompts'}
-        />
-        {state.artifactZone.length > 0 && (
-          <div className="mt-2 flex gap-1 justify-center flex-wrap">
-            {state.artifactZone.map((id, i) => {
-              const card = ALL_CARDS_MAP.get(id);
-              return card ? (
-                <span key={i} className="text-[9px] px-2 py-0.5 rounded bg-[#9b3dbb]/15 text-[#9b3dbb]/70 border border-[#9b3dbb]/20 font-mono">
-                  {card.name}
-                </span>
-              ) : null;
-            })}
+      {/* ── AI zone ──────────────────────────────────────────────── */}
+      <div className={`px-3 pb-3 mb-1 rounded-xl mx-2 transition-all duration-300 ${state.activePlayer === 'ai' ? 'bg-[#cebefa]/3 border border-[#cebefa]/8' : 'border border-transparent'}`}>
+        {/* AI creator bar */}
+        <div className="flex items-center gap-3 mb-2">
+          <div className="flex flex-col gap-0.5 shrink-0">
+            <span className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/30 font-mono">AI · {aCreatorCard?.name ?? '—'}</span>
+            <LoyaltyBar current={aiP.creator.loyalty} max={aCreatorCard?.loyalty ?? 10} label="AI" />
           </div>
-        )}
+          <div className="flex items-center gap-2 ml-auto text-[10px] font-mono text-[#c0c8c5]/30">
+            <span>{aiP.creator.reputation}R</span>
+            <span>{aiP.credits}Cr</span>
+            <span>{aiP.hand.length} cards</span>
+          </div>
+        </div>
+
+        {/* AI field */}
+        <div className="flex gap-2 flex-wrap min-h-[88px] items-end">
+          <AnimatePresence>
+            {[...aiP.field, ...aiP.queue].map(c => (
+              <CreationTile key={c.instanceId} c={c}
+                glow={uiMode === 'awaiting_target' && c.runtimeLeft === 0 ? 'red' : 'none'}
+                onClick={() => handleCreationClick(c, 'ai')}
+              />
+            ))}
+          </AnimatePresence>
+          {aiP.field.length === 0 && aiP.queue.length === 0 && (
+            <span className="text-[10px] text-[#c0c8c5]/15 italic self-center">No AI creations on field</span>
+          )}
+        </div>
       </div>
 
-      {/* ── Player zone ── */}
-      <div className="flex flex-col gap-2 px-2 pt-3">
-        <div className="flex items-start gap-3">
-          {humanCreatorCard && (
+      {/* ── Shared zone ──────────────────────────────────────────── */}
+      <div className="mx-2 py-3 px-3 border-y border-white/6 bg-[#0d1211]/30">
+        <div className="flex flex-col gap-2">
+          <div className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/25 font-mono">— Shared Model Zone —</div>
+          <div className="flex gap-2 flex-wrap items-center min-h-[52px]">
+            {state.sharedModels.length === 0 && (
+              <span className="text-[10px] text-[#c0c8c5]/20 italic">
+                No models in play yet — play a model card or a guaranteed model to start
+              </span>
+            )}
+            {state.sharedModels.map(m => (
+              <SharedModelCard
+                key={m.modelId}
+                model={m}
+                canActivate={isMyTurn && !m.activatedThisTurn && (state.round >= 2 || m.placedByPlayer === 'human') && humanP.credits >= (CMAP.get(m.modelId)?.activateCost ?? 0)}
+                onActivate={() => handleModelActivate(m.modelId)}
+              />
+            ))}
+          </div>
+          {state.artifactZone.length > 0 && (
+            <div className="flex gap-1 flex-wrap">
+              {state.artifactZone.map((id, i) => {
+                const c = CMAP.get(id);
+                return c ? <span key={i} className="text-[8px] px-2 py-0.5 rounded border border-[#bb6bd9]/25 bg-[#bb6bd9]/8 text-[#bb6bd9]/70 font-mono">{c.name}</span> : null;
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Player zone ──────────────────────────────────────────── */}
+      <div className={`px-3 pt-3 mx-2 rounded-xl transition-all duration-300 ${isMyTurn ? 'bg-[#a1d0c6]/3 border border-[#a1d0c6]/8' : 'border border-transparent'}`}>
+
+        {/* Player field + creator */}
+        <div className="flex items-start gap-3 mb-3">
+          {/* Creator ability panel */}
+          {hCreatorCard && (
             <CreatorAbilityPanel
-              card={humanCreatorCard}
-              currentReputation={state.human.creator.reputation}
-              currentLoyalty={state.human.creator.loyalty}
-              isExhausted={state.human.creator.isExhausted || state.abilityUsedThisTurn.includes('human')}
-              isMyTurn={isPlayerTurn}
-              onSelectAbility={handleAbilitySelect}
+              card={hCreatorCard}
+              currentReputation={humanP.creator.reputation}
+              currentLoyalty={humanP.creator.loyalty}
+              isExhausted={state.abilityUsedThisTurn.includes('human')}
+              isMyTurn={isMyTurn}
+              onSelectAbility={handleAbility}
               className="shrink-0"
             />
           )}
-          <div className="flex gap-2 flex-wrap min-h-[80px] items-center flex-1">
-            <AnimatePresence>
-              {[...state.human.field, ...state.human.queue].map(c => (
-                <CreationToken key={c.instanceId} creation={c} isOwn={true}
-                  highlight={c.clipLocked ? 'glow' : undefined}
-                  onClick={() => handleCreationClick(c, 'human')}
-                />
-              ))}
-            </AnimatePresence>
-            {state.human.field.length === 0 && state.human.queue.length === 0 && (
-              <span className="text-[10px] text-[#c0c8c5]/15 italic">No creations — play a model card!</span>
-            )}
+
+          {/* Player field */}
+          <div className="flex-1 flex flex-col gap-2">
+            <div className="flex gap-2 flex-wrap min-h-[88px] items-end">
+              <AnimatePresence>
+                {[...humanP.field, ...humanP.queue].map(c => (
+                  <CreationTile
+                    key={c.instanceId} c={c}
+                    glow={c.clipLocked ? 'teal' : 'none'}
+                    onClick={() => handleCreationClick(c, 'human')}
+                  />
+                ))}
+              </AnimatePresence>
+              {humanP.field.length === 0 && humanP.queue.length === 0 && (
+                <span className="text-[10px] text-[#c0c8c5]/15 italic self-center">Play a model, then activate it to generate a creation</span>
+              )}
+            </div>
+            <LoyaltyBar current={humanP.creator.loyalty} max={hCreatorCard?.loyalty ?? 10} label="You" />
+            <div className="flex items-center gap-2 text-[10px] font-mono text-[#c0c8c5]/35">
+              <span className="text-[#a1d0c6]/60">{humanP.creator.reputation} Rep</span>
+              <span>·</span>
+              <span className="text-yellow-400/60">{humanP.credits} Credits</span>
+              <span>·</span>
+              <span>{humanP.deck.length} in deck</span>
+              <span>·</span>
+              <span>{humanP.discard.length} discarded</span>
+            </div>
           </div>
         </div>
 
-        {humanCreatorCard && (
-          <CreatorBar
-            label="You" loyalty={state.human.creator.loyalty} maxLoyalty={humanCreatorCard.loyalty ?? 10}
-            rep={state.human.creator.reputation} credits={state.human.credits}
-            isActive={isPlayerTurn} isExhausted={state.human.creator.isExhausted}
-          />
+        {/* Guaranteed models */}
+        {humanP.guaranteedModels.length > 0 && (
+          <div className="flex flex-col gap-1.5 mb-3">
+            <div className="text-[8px] uppercase tracking-widest text-[#cebefa]/35 font-mono">Guaranteed Models (free to play)</div>
+            <div className="flex gap-2 flex-wrap">
+              {humanP.guaranteedModels.map(c => (
+                <GuaranteedModelBadge
+                  key={c.id} card={c}
+                  canPlay={isMyTurn}
+                  onPlay={() => {
+                    dispatch({ type: 'PLAY_GUARANTEED_MODEL', player: 'human', cardId: c.id });
+                    flash(`${c.name} placed in shared zone (free)`);
+                  }}
+                />
+              ))}
+            </div>
+          </div>
         )}
 
         {/* Hand */}
-        <div className="flex flex-col gap-1 pt-1">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-[9px] uppercase tracking-widest text-[#c0c8c5]/30 font-mono">
-              Hand ({state.human.hand.length})
-            </span>
-            {uiMode === 'await_model_for_prompts' && (
-              <span className="text-[9px] text-yellow-400/80 font-mono">
-                {selectedPromptIds.length} prompt(s) selected — click a model above to activate
-              </span>
-            )}
-            {uiMode === 'select_target_ability' && (
-              <span className="text-[9px] text-red-400/80 font-mono animate-pulse">
-                Click an opponent creation to target it
-              </span>
+        <div className="flex flex-col gap-1.5 mb-3">
+          <div className="flex items-center justify-between">
+            <div className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/30 font-mono">Hand ({humanP.hand.length})</div>
+            {selectedPrompts.length > 0 && (
+              <div className="text-[9px] text-yellow-300/70 font-mono">
+                {selectedPrompts.length} prompt(s) ready — click a model above to activate
+              </div>
             )}
           </div>
-          <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1" style={{ scrollbarWidth: 'thin' }}>
-            {state.human.hand.map((card, idx) => {
-              const isSelected = selectedPromptIds.includes(card.id);
-              const p = state.human;
-              let playable = isPlayerTurn;
-              if (card.type === 'model')    playable = isPlayerTurn && p.credits >= (card.playCost ?? 0);
-              if (card.type === 'prompt')   playable = isPlayerTurn && state.sharedModels.some(m => !m.activatedThisTurn);
-              if (card.type === 'modifier') playable = isPlayerTurn && p.credits >= (card.cost ?? 0);
-              if (card.type === 'artifact') playable = isPlayerTurn && p.credits >= (card.cost ?? 0);
-              if (card.type === 'event')    playable = isPlayerTurn && state.round >= 2 && p.credits >= (card.cost ?? 0);
-
+          <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" style={{ scrollbarWidth: 'thin' }}>
+            {humanP.hand.map((card, idx) => {
+              const p = humanP;
+              let playable = isMyTurn;
+              if (card.type === 'model')    playable = isMyTurn && p.credits >= (card.playCost ?? 0);
+              if (card.type === 'prompt')   playable = isMyTurn && state.sharedModels.some(m => !m.activatedThisTurn);
+              if (card.type === 'modifier') playable = isMyTurn && p.credits >= (card.cost ?? 0);
+              if (card.type === 'artifact') playable = isMyTurn && p.credits >= (card.cost ?? 0);
+              if (card.type === 'event')    playable = isMyTurn && state.round >= 2 && p.credits >= (card.cost ?? 0);
               return (
                 <HandCard
                   key={`${card.id}-${idx}`}
                   card={card}
-                  selected={isSelected}
+                  selected={selectedPrompts.includes(card.id)}
                   playable={playable}
-                  onClick={() => handleHandCardClick(card)}
+                  onClick={() => handleHandCard(card)}
                 />
               );
             })}
-            {state.human.hand.length === 0 && (
-              <span className="text-[10px] text-[#c0c8c5]/20 italic py-4">No cards in hand</span>
+            {humanP.hand.length === 0 && (
+              <span className="text-[10px] text-[#c0c8c5]/20 italic py-4 px-2">Empty hand</span>
             )}
           </div>
         </div>
 
-        {/* Action bar */}
-        <div className="flex gap-2 flex-wrap items-center pt-1 border-t border-[#a1d0c6]/8">
+        {/* Actions */}
+        <div className="flex items-center gap-2 pb-3 border-t border-white/6 pt-2">
           {uiMode !== 'idle' && (
-            <button onClick={handleCancelMode}
-              className="px-3 py-1.5 rounded-lg border border-red-500/25 text-red-400/70 text-[11px] font-mono hover:bg-red-950/20 transition-colors"
-            >
-              ✕ Cancel
-            </button>
+            <button onClick={cancelMode}
+              className="px-3 py-1.5 rounded-lg border border-red-400/20 text-red-400/60 text-[10px] font-mono hover:bg-red-400/8 transition-all"
+            >✕ Cancel</button>
           )}
           <button
-            onClick={handleEndTurn}
-            disabled={!isPlayerTurn}
-            className={`ml-auto px-5 py-1.5 rounded-lg border text-[11px] font-bold font-mono transition-all
-              ${isPlayerTurn
-                ? 'border-[#a1d0c6]/40 text-[#a1d0c6] hover:bg-[#a1d0c6]/10 active:scale-95'
-                : 'border-[#a1d0c6]/8 text-[#a1d0c6]/20 cursor-not-allowed'
+            onClick={() => { if (isMyTurn) dispatch({ type: 'CONCEDE', player: 'human' }); }}
+            className="px-3 py-1.5 rounded-lg border border-white/8 text-[#c0c8c5]/25 text-[10px] font-mono hover:text-[#c0c8c5]/50 hover:border-white/15 transition-all"
+          >Concede</button>
+          <button
+            onClick={endTurn}
+            disabled={!isMyTurn}
+            className={`ml-auto px-6 py-1.5 rounded-xl text-[12px] font-black transition-all
+              ${isMyTurn
+                ? 'bg-[#a1d0c6] text-[#0d1211] hover:bg-[#b5dbd4] shadow-[0_2px_12px_rgba(161,208,198,0.25)] active:scale-95'
+                : 'bg-white/5 text-white/15 cursor-not-allowed'
               }`}
-          >
-            End Turn →
-          </button>
+          >End Turn →</button>
         </div>
       </div>
 
-      {/* Log */}
+      {/* ── Game log ─────────────────────────────────────────────── */}
       <div ref={logRef}
-        className="mt-4 mx-2 rounded-xl border border-[#a1d0c6]/8 bg-[#1c2120]/30 p-3 max-h-32 overflow-y-auto"
+        className="mx-2 mt-2 rounded-xl border border-white/6 bg-[#0d1211]/40 p-3 max-h-28 overflow-y-auto"
         style={{ scrollbarWidth: 'thin' }}
       >
-        <span className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/25 font-mono block mb-1">Game Log</span>
-        {state.log.slice(0, 60).map(entry => (
-          <div key={entry.id} className={`text-[10px] font-mono leading-relaxed
-            ${entry.type === 'combat' ? 'text-red-400/70'
-            : entry.type === 'action' ? 'text-[#a1d0c6]/60'
-            : entry.type === 'error'  ? 'text-orange-400/80'
-            : 'text-[#c0c8c5]/30'}`}
-          >
-            T{entry.turn} {entry.text}
-          </div>
+        <div className="text-[7px] uppercase tracking-widest text-[#c0c8c5]/20 font-mono mb-1">Game Log</div>
+        {state.log.slice(0, 80).map(e => (
+          <div key={e.id} className={`text-[9px] font-mono leading-relaxed
+            ${e.type === 'combat' ? 'text-red-400/60' : e.type === 'action' ? 'text-[#a1d0c6]/55' : e.type === 'error' ? 'text-orange-400/80' : 'text-[#c0c8c5]/25'}`}
+          >T{e.turn} {e.text}</div>
         ))}
-        {state.log.length === 0 && (
-          <span className="text-[9px] text-[#c0c8c5]/20 italic">Game starting…</span>
-        )}
+        {state.log.length === 0 && <span className="text-[9px] text-[#c0c8c5]/15 italic">Game starting…</span>}
       </div>
     </div>
   );
