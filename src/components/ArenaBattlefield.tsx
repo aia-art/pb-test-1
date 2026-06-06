@@ -202,7 +202,7 @@ const TYPE_COLOR: Record<string, string> = {
 };
 
 function blankPlayer(id: PlayerId): import('../game-engine').PlayerState {
-  return { id, creator: { cardId: '', loyalty: 10, reputation: 0, isExhausted: false }, hand: [], guaranteedModels: [], deck: [], discard: [], credits: 0, creditCap: 10, field: [], queue: [], remixQueue: null, modifiers: [], mulliganed: false };
+  return { id, creator: { cardId: '', loyalty: 10, reputation: 0, isExhausted: false }, hand: [], guaranteedModels: [], deck: [], discard: [], credits: 0, creditCap: 10, field: [], queue: [], remixQueue: null, modifiers: [], mulliganed: false, turnsPlayed: 0 };
 }
 
 const BLANK: GameState = {
@@ -211,6 +211,7 @@ const BLANK: GameState = {
   turn: 1, round: 1, activePlayer: 'human',
   phase: 'mulligan', mulliganPhase: { humanDone: false, aiDone: false },
   winner: null, log: [], abilityUsedThisTurn: [],
+  favouritePromptActive: false,
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -372,6 +373,43 @@ function GuaranteedModelBadge({ card, onPlay, canPlay, onInfo }: { card: Card; o
       <span className="text-[10px] font-bold text-[#dfe3e1] leading-tight">{card.name}</span>
       <span className="text-[8px] font-mono text-[#cebefa]/50">Q{card.quality} · Free</span>
       {canPlay && <span className="text-[8px] text-[#cebefa]/60">↑ Play</span>}
+      {onInfo && (
+        <button onClick={e => { e.stopPropagation(); onInfo(); }}
+          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white/8 hover:bg-white/18 flex items-center justify-center text-[8px] text-white/35 hover:text-white/70 transition-all"
+        >?</button>
+      )}
+    </motion.button>
+  );
+}
+
+// Favourite prompt badge (usable during activation like a hand prompt)
+function FavouritePromptBadge({ card, selected, canSelect, onToggle, onInfo }: {
+  card: import('../types').Card;
+  selected: boolean;
+  canSelect: boolean;
+  onToggle: () => void;
+  onInfo?: () => void;
+}) {
+  const fp = card.favouritePrompt;
+  if (!fp) return null;
+  return (
+    <motion.button
+      onClick={canSelect ? onToggle : undefined}
+      whileHover={canSelect ? { scale: 1.04, y: -3 } : {}}
+      whileTap={canSelect   ? { scale: 0.96 } : {}}
+      className={`relative flex flex-col items-start gap-0.5 px-2.5 py-2 rounded-xl border text-left w-[110px] shrink-0 transition-all
+        ${selected
+          ? 'border-[#a1d0c6]/70 bg-[#a1d0c6]/12 shadow-[0_0_12px_rgba(161,208,198,0.3)]'
+          : canSelect
+            ? 'border-[#cebefa]/30 bg-[#cebefa]/5 hover:border-[#cebefa]/55 cursor-pointer'
+            : 'border-white/5 opacity-30 cursor-not-allowed'
+        }`}
+    >
+      <div className="w-full h-[2px] rounded-full mb-1 bg-[#cebefa]/50" />
+      <span className="text-[7px] uppercase tracking-widest text-[#cebefa]/50 font-mono">Fav. Prompt · {fp.subtype}</span>
+      <span className="text-[10px] font-bold text-[#dfe3e1] leading-tight italic line-clamp-2">{fp.text}</span>
+      <span className="text-[8px] text-[#c0c8c5]/35 leading-tight mt-0.5 line-clamp-2">{fp.effect}</span>
+      {selected && <span className="text-[8px] text-[#a1d0c6] font-mono mt-0.5">✓ Selected</span>}
       {onInfo && (
         <button onClick={e => { e.stopPropagation(); onInfo(); }}
           className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white/8 hover:bg-white/18 flex items-center justify-center text-[8px] text-white/35 hover:text-white/70 transition-all"
@@ -1022,7 +1060,7 @@ export default function ArenaBattlefield() {
         ? selectedPrompts.filter(x => x !== card.id)
         : [...selectedPrompts.slice(-1), card.id];
       setSelectedPrompts(toggled);
-      setUIMode(toggled.length > 0 ? 'prompts_selected' : 'idle');
+      setUIMode(toggled.length > 0 || state.favouritePromptActive ? 'prompts_selected' : 'idle');
       flash(toggled.length > 0 ? `${toggled.length} prompt(s) selected — click a model to activate` : 'Prompt deselected');
       return;
     }
@@ -1049,9 +1087,23 @@ export default function ArenaBattlefield() {
 
   function handleModelActivate(modelId: string) {
     if (!isMyTurn) return;
-    dispatch({ type: 'ACTIVATE_MODEL', player: 'human', modelId, promptIds: selectedPrompts });
+    // Build prompt list: hand prompts + fav prompt if toggled
+    const promptList = [...selectedPrompts];
+    if (state.favouritePromptActive && hCreatorCard?.favouritePrompt) {
+      // Fav prompt is identified by a special sentinel id 'FAV_PROMPT'
+      promptList.push('FAV_PROMPT');
+    }
+    dispatch({ type: 'ACTIVATE_MODEL', player: 'human', modelId, promptIds: promptList });
+    if (state.favouritePromptActive) dispatch({ type: 'TOGGLE_FAVOURITE_PROMPT', player: 'human' });
     setSelectedPrompts([]); setUIMode('idle');
     flash('Model activated — creation queued!');
+  }
+
+  function handleFavPromptToggle() {
+    if (!isMyTurn) return;
+    if (!hCreatorCard?.favouritePrompt) return;
+    dispatch({ type: 'TOGGLE_FAVOURITE_PROMPT', player: 'human' });
+    flash(state.favouritePromptActive ? 'Favourite prompt deselected' : `Favourite prompt selected: ${hCreatorCard.favouritePrompt.subtype}`);
   }
 
   function handleAbility(num: number | 'signature') {
@@ -1283,6 +1335,16 @@ export default function ArenaBattlefield() {
             )}
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" style={{ scrollbarWidth: 'thin' }}>
+            {/* Favourite prompt — shown as a special selectable card if creator has one */}
+            {hCreatorCard?.favouritePrompt && (
+              <FavouritePromptBadge
+                card={hCreatorCard}
+                selected={state.favouritePromptActive}
+                canSelect={isMyTurn && state.sharedModels.some(m => !m.activatedThisTurn)}
+                onToggle={handleFavPromptToggle}
+                onInfo={() => setModalCard(hCreatorCard)}
+              />
+            )}
             {humanP.hand.map((card, idx) => {
               const p = humanP;
               let playable = isMyTurn;

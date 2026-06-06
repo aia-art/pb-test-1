@@ -59,6 +59,7 @@ export interface PlayerState {
   remixQueue:       Creation | null;
   modifiers:        AttachedModifier[];
   mulliganed:       boolean;
+  turnsPlayed:      number;   // increments each time this player completes a turn
 }
 
 export interface GameState {
@@ -74,6 +75,7 @@ export interface GameState {
   winner:              PlayerId | 'draw' | null;
   log:                 LogEntry[];
   abilityUsedThisTurn: PlayerId[];
+  favouritePromptActive: boolean;  // human has toggled their fav prompt in for next activation
 }
 
 export interface LogEntry {
@@ -95,6 +97,7 @@ export type GameAction =
   | { type: 'PLAY_EVENT'; player: PlayerId; cardId: string }
   | { type: 'USE_CREATOR_ABILITY'; player: PlayerId; abilityNum: number | 'signature'; targetId?: string }
   | { type: 'APPLY_CLIP_LOCK'; player: PlayerId; creationId: string }
+  | { type: 'TOGGLE_FAVOURITE_PROMPT'; player: PlayerId }   // select/deselect fav prompt as one of the 2 prompts
   | { type: 'END_TURN'; player: PlayerId }
   | { type: 'CONCEDE'; player: PlayerId };
 
@@ -210,6 +213,7 @@ function buildPlayer(id: PlayerId, creatorId: string, deck: Card[], allCards: Ma
     remixQueue:       null,
     modifiers:        [],
     mulliganed:       false,
+    turnsPlayed:      0,
   };
 }
 
@@ -269,13 +273,19 @@ function runRefresh(state: GameState, allCards: Map<string, Card>): GameState {
   s = setPlayer(s, pid, p);
   if (totalRep > 0) s = addLog(s, `${pid} gains ${totalRep} rep (now ${newRep})`, 'system');
 
-  // Step 6: creator stress (round 2+)
+  // Step 6a: influence effects (start of turn)
+  s = resolveInfluence(s, pid, allCards);
+
+  // Step 6b: creator stress — "Turn 2 onwards" = each player's 2nd+ turn
   p = getPlayer(s, pid);
-  if (s.round >= 2 && p.field.length === 0 && p.queue.length === 0) {
+  if (p.turnsPlayed >= 1 && p.field.length === 0 && p.queue.length === 0) {
     p = { ...p, creator: { ...p.creator, loyalty: capLoy(p.creator.loyalty - 1) } };
     s = setPlayer(s, pid, p);
     s = addLog(s, `${pid} creator stress! -1 loyalty`, 'combat');
   }
+
+  // Step 6c: ongoing passive resolution
+  s = resolveOngoingPassives(s, pid, allCards);
 
   // Reset exhausted
   p = getPlayer(s, pid);
@@ -300,8 +310,8 @@ function runEnd(state: GameState): GameState {
   let p = getPlayer(state, pid);
   let s = state;
 
-  // Carryover
-  p = { ...p, credits: Math.floor(p.credits / 2) };
+  // Carryover + increment turns played
+  p = { ...p, credits: Math.floor(p.credits / 2), turnsPlayed: p.turnsPlayed + 1 };
 
   // Discard to 7
   if (p.hand.length > 7) {
@@ -365,6 +375,91 @@ function playModel(state: GameState, pid: PlayerId, cardId: string, allCards: Ma
   return addLog(s, `${pid} plays model: ${card.name}`, 'action');
 }
 
+// ─────────────────────────────────────────────────────────────
+// Passive / Influence effect resolution
+// ─────────────────────────────────────────────────────────────
+
+function resolvePassives(state: GameState, pid: PlayerId, newCreation: Creation, allCards: Map<string, Card>): GameState {
+  const opp    = pid === 'human' ? 'ai' : 'human';
+  const p      = getPlayer(state, pid);
+  const oppP   = getPlayer(state, opp);
+  const creator = allCards.get(p.creator.cardId);
+  if (!creator) return state;
+  let s = state;
+
+  // ── Aia (C-001): CLIP-LOCK Mastery is manual (already handled via APPLY_CLIP_LOCK)
+
+  // ── Anonymous User (C-002): Copycat
+  // When a new Creation enters that shares a Style tag with an opponent active Creation,
+  // steal 2 Visibility Counters from that opponent Creation.
+  if (creator.id === 'C-002' && newCreation.styleTag) {
+    const targets = oppP.field.filter(c => c.styleTag === newCreation.styleTag && c.runtimeLeft === 0);
+    if (targets.length > 0) {
+      // Steal from first eligible (player would choose, AI just picks highest vis)
+      const target = targets.reduce((best, c) => c.visibility > best.visibility ? c : best, targets[0]);
+      const stolen = Math.min(2, target.visibility);
+      const newOppField = oppP.field.map(c =>
+        c.instanceId === target.instanceId ? { ...c, visibility: Math.max(0, c.visibility - stolen) } : c
+      );
+      // Add stolen vis to the new creation (find it in queue)
+      const newPField  = p.field.map(c =>
+        c.instanceId === newCreation.instanceId ? { ...c, visibility: c.visibility + stolen } : c
+      );
+      const newPQueue  = p.queue.map(c =>
+        c.instanceId === newCreation.instanceId ? { ...c, visibility: c.visibility + stolen } : c
+      );
+      s = setPlayer(s, opp, { ...oppP, field: newOppField });
+      s = setPlayer(s, pid,  { ...getPlayer(s, pid), field: newPField, queue: newPQueue });
+      s = addLog(s, `${pid} Copycat! Stole ${stolen} visibility from opponent's ${target.styleTag} creation`, 'action');
+    }
+  }
+
+  return s;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Influence effect resolution (start of turn)
+// ─────────────────────────────────────────────────────────────
+
+function resolveInfluence(state: GameState, pid: PlayerId, allCards: Map<string, Card>): GameState {
+  const p      = getPlayer(state, pid);
+  const creator = allCards.get(p.creator.cardId);
+  if (!creator?.influence) return state;
+  let s = state;
+
+  // ── Anonymous User (C-002): Safety in Numbers
+  // At start of turn: friendly Creations with ≤3 vis are immune to single-target until next turn
+  if (creator.id === 'C-002') {
+    const newField = p.field.map(c =>
+      c.visibility <= 3 && c.runtimeLeft === 0
+        ? { ...c, immuneUntilTurn: state.turn + 2 }
+        : c
+    );
+    const protected_count = newField.filter(c => c.immuneUntilTurn >= state.turn).length;
+    s = setPlayer(s, pid, { ...p, field: newField });
+    if (protected_count > 0) {
+      s = addLog(s, `${pid} Safety in Numbers: ${protected_count} creation(s) protected`, 'system');
+    }
+  }
+
+  return s;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Anonymous User passive on-field effect (Copycat vis bonus)
+// Applied each refresh for already-on-field creations with matching style
+// ─────────────────────────────────────────────────────────────
+
+function resolveOngoingPassives(state: GameState, pid: PlayerId, allCards: Map<string, Card>): GameState {
+  const p      = getPlayer(state, pid);
+  const creator = allCards.get(p.creator.cardId);
+  if (!creator) return state;
+  // Aia: CLIP-LOCK Mastery is manual — no ongoing resolution needed here
+  // Anonymous User: Copycat only triggers on generation, not ongoing
+  return state;
+}
+
+
 function activateModel(state: GameState, pid: PlayerId, modelId: string, promptIds: string[], allCards: Map<string, Card>): GameState {
   const entry = state.sharedModels.find(m => m.modelId === modelId);
   if (!entry) return addLog(state, 'Model not in shared zone', 'error');
@@ -378,7 +473,7 @@ function activateModel(state: GameState, pid: PlayerId, modelId: string, promptI
   if (p.queue.length >= 2) return addLog(state, 'Queue full (max 2)', 'error');
 
   let totalCost = modelCard.activateCost ?? 0;
-  for (const pid2 of promptIds) totalCost += allCards.get(pid2)?.cost ?? 0;
+  for (const pid2 of promptIds.filter(id => id !== 'FAV_PROMPT')) totalCost += allCards.get(pid2)?.cost ?? 0;
   if (p.credits < totalCost) return addLog(state, `Need ${totalCost}Cr, have ${p.credits}Cr`, 'error');
 
   // Build creation
@@ -393,7 +488,7 @@ function activateModel(state: GameState, pid: PlayerId, modelId: string, promptI
   if (mfx.includes('glitch token'))     glitch   += 1;
   if (modelCard.id === 'M-004')         glitch   += 1; // SD 1.5 always glitches
 
-  for (const pid2 of promptIds) {
+  for (const pid2 of promptIds.filter(id => id !== 'FAV_PROMPT')) {
     const pc = allCards.get(pid2);
     if (!pc) continue;
     const pe = (pc.effect ?? '').toLowerCase();
@@ -403,13 +498,35 @@ function activateModel(state: GameState, pid: PlayerId, modelId: string, promptI
     const vm = pe.match(/(\d+) bonus vis/);
     if (vm) visBonus += parseInt(vm[1]);
     if (pe.includes('runtime increases by 1')) runtime += 1;
-    // Style tags
     if (pc.subtype === 'Style' || pc.promptType === 'Style') {
-      if (pe.includes('fantasy'))    styleTag = 'Fantasy';
-      if (pe.includes('landscape'))  styleTag = 'Landscape';
-      if (pe.includes('portrait'))   styleTag = 'Portrait';
-      if (pe.includes('abstract'))   styleTag = 'Abstract';
-      if (pe.includes('atmosphere')) styleTag = 'Atmosphere';
+      const pestyle = pe;
+      if (pestyle.includes('fantasy'))    styleTag = 'Fantasy';
+      if (pestyle.includes('landscape'))  styleTag = 'Landscape';
+      if (pestyle.includes('portrait'))   styleTag = 'Portrait';
+      if (pestyle.includes('abstract'))   styleTag = 'Abstract';
+      if (pestyle.includes('atmosphere')) styleTag = 'Atmosphere';
+    }
+  }
+
+  // Resolve favourite prompt effect
+  if (promptIds.includes('FAV_PROMPT')) {
+    const playerCreator = allCards.get(getPlayer(state, pid).creator.cardId);
+    const fp = playerCreator?.favouritePrompt;
+    if (fp) {
+      const fpe = fp.effect.toLowerCase();
+      const fqm = fpe.match(/\+(\d+) quality/);
+      if (fqm) quality += parseInt(fqm[1]);
+      if (fpe.includes('glitch token') && !fpe.includes('remove')) glitch += 1;
+      const fvm = fpe.match(/(\d+) bonus vis/);
+      if (fvm) visBonus += parseInt(fvm[1]);
+      if (fp.subtype === 'Atmosphere' || fp.subtype === 'Style' || fp.subtype === 'Artist') {
+        const ft = fpe;
+        if (ft.includes('fantasy'))    styleTag = 'Fantasy';
+        if (ft.includes('landscape'))  styleTag = 'Landscape';
+        if (ft.includes('portrait'))   styleTag = 'Portrait';
+        if (ft.includes('abstract'))   styleTag = 'Abstract';
+        if (ft.includes('atmosphere')) styleTag = 'Atmosphere';
+      }
     }
   }
 
@@ -436,6 +553,9 @@ function activateModel(state: GameState, pid: PlayerId, modelId: string, promptI
   let s = setPlayer(state, pid, p);
   s = { ...s, sharedModels: s.sharedModels.map(m => m.modelId === modelId ? { ...m, activatedThisTurn: true, activationsThisRound: m.activationsThisRound + 1 } : m) };
   s = addLog(s, `${pid} activates ${modelCard.name} → Q${quality}${glitch > 0 ? `-${glitch}G` : ''} RT${runtime}`, 'action');
+  // Reset favourite prompt toggle after use
+  if (pid === 'human') s = { ...s, favouritePromptActive: false };
+  s = resolvePassives(s, pid, creation, allCards);
   return enforceAbsoluteRules(s);
 }
 
@@ -568,6 +688,7 @@ export function gameReducer(state: GameState, action: GameAction, allCards: Map<
         mulliganPhase: { humanDone: false, aiDone: false },
         winner: null, log: [],
         abilityUsedThisTurn: [],
+        favouritePromptActive: false,
       };
     }
 
@@ -645,6 +766,9 @@ export function gameReducer(state: GameState, action: GameAction, allCards: Map<
       if (s.phase === 'refresh') s = runRefresh(s, allCards);
       return s;
     }
+
+    case 'TOGGLE_FAVOURITE_PROMPT':
+      return { ...state, favouritePromptActive: !state.favouritePromptActive };
 
     case 'CONCEDE':
       return { ...state, phase: 'game_over', winner: action.player === 'human' ? 'ai' : 'human' };
