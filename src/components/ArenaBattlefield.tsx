@@ -1,1410 +1,952 @@
 // ============================================================
-// PROMPT BATTLE — ArenaBattlefield · v0.3
+// PROMPT BATTLE — Arena Battlefield (vs AI)
+// Full game UI + heuristic AI opponent
 // ============================================================
+import { useState, useEffect, useRef } from 'react';
+import { getCardById } from '../data';
+import type { GameState, CreationState, ModelState, PlayerId, StyleTag } from '../game/gameTypes';
+import {
+  initGame, applyMulligan, runRefreshPhase, runEndPhase, resolveSlotOverflow,
+  playModel, activateModel, playModifier, playArtifact, playEvent,
+  useCreatorAbility, applyClipLock, remixCreation, removeArtifact,
+  effectiveQuality, effectiveStyle, canUseAbility, creatorGlowColor,
+  getAllDecks, loadDeckStore, addLog,
+} from '../game/gameEngine';
+import { aiDecideMulligan, runAiTurn } from '../game/aiEngine';
 
-import { useReducer, useEffect, useRef, useState, useCallback } from 'react';
-import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'motion/react';
-import { ALL_CARDS, PREBUILT_DECKS } from '../data';
-import type { Card } from '../types';
-import { gameReducer } from '../game-engine';
-import type { GameState, GameAction, Creation, PlayerId } from '../game-engine';
-import { createAI } from '../ai-engine';
-import type { Difficulty } from '../ai-engine';
-import CreatorAbilityPanel from './CreatorAbilityPanel';
-
-// ─────────────────────────────────────────────────────────────
-// Constants & helpers
-// ─────────────────────────────────────────────────────────────
-
-const CMAP = new Map(ALL_CARDS.map(c => [c.id, c]));
-
-// ─────────────────────────────────────────────────────────────
-// Deck preference storage
-// ─────────────────────────────────────────────────────────────
-
-const PREF_KEY = 'pb_prefs';
-interface Prefs { lastUsedId?: string; favouriteId?: string; }
-function loadPrefs(): Prefs {
-  try { return JSON.parse(localStorage.getItem(PREF_KEY) ?? '{}'); } catch { return {}; }
+// ─── Storage for deck meta ───────────────────────────────────────
+const META_KEY = 'pb_play_meta';
+function loadMeta(): { lastDeck?: string; favouriteDeck?: string } {
+  try { return JSON.parse(localStorage.getItem(META_KEY) ?? '{}'); } catch { return {}; }
 }
-function savePrefs(p: Prefs) { localStorage.setItem(PREF_KEY, JSON.stringify(p)); }
+function saveMeta(m: object) { localStorage.setItem(META_KEY, JSON.stringify(m)); }
 
-// ─────────────────────────────────────────────────────────────
-// Card detail modal (reuses CardGallery logic inline)
-// ─────────────────────────────────────────────────────────────
+// ─── Pending action type ─────────────────────────────────────────
+type PendingAction =
+  | { kind: 'activate'; modelInstanceId: string; prompts: string[]; useFav: boolean }
+  | { kind: 'play-modifier'; cardId: string }
+  | { kind: 'play-artifact'; cardId: string }
+  | { kind: 'play-event'; cardId: string }
+  | { kind: 'ability'; abilityNum: number | 'signature'; targets: string[] }
+  | { kind: 'clip-lock' }
+  | { kind: 'remix' }
+  | { kind: 'discard'; count: number; selected: string[] };
 
-const RARITY_COL: Record<string, string> = {
-  common: 'text-[#8a9490]', uncommon: 'text-[#4a9a6e]',
-  rare:   'text-[#a1d0c6]', mythic:   'text-[#cebefa]',
+const STYLE_CLR: Record<string, string> = {
+  Fantasy:'text-purple-400', Landscape:'text-green-400',
+  Portrait:'text-pink-400', Abstract:'text-orange-400', Atmosphere:'text-blue-400',
 };
-const TYPE_BORDER: Record<string, string> = {
-  creator:  'border-[#a1d0c6]/60 bg-[#a1d0c6]/10',
-  model:    'border-[#cebefa]/40 bg-[#cebefa]/10',
-  prompt:   'border-[#4a9a6e]/40 bg-[#4a9a6e]/10',
-  modifier: 'border-[#b8842a]/40 bg-[#b8842a]/10',
-  artifact: 'border-[#9b3dbb]/40 bg-[#9b3dbb]/10',
-  event:    'border-[#3d6abb]/40 bg-[#3d6abb]/10',
-};
-const MOOD_G: Record<string, string> = {
-  iridescent: 'from-purple-900/40 via-teal-900/30 to-amber-900/20',
-  chaotic:    'from-red-900/30 via-purple-900/20 to-green-900/20',
-  precise:    'from-blue-900/30 to-teal-900/20',
-  bold:       'from-orange-900/30 to-amber-900/20',
-  neutral:    'from-slate-800/60 to-slate-900/40',
-  grainy:     'from-stone-800/50 to-stone-900/40',
-  epic:       'from-amber-900/40 to-yellow-900/20',
-  ethereal:   'from-indigo-900/40 to-violet-900/20',
-  dark:       'from-zinc-900/60 to-neutral-900/50',
-  warm:       'from-rose-900/30 to-orange-900/20',
-};
-function moodG(card: import('../types').Card) {
-  return MOOD_G[card.illustrationMood ?? 'neutral'] ?? MOOD_G.neutral;
-}
 
-function InGameCardModal({ card, onClose }: { card: import('../types').Card; onClose: () => void }) {
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
-
-  const abList = [
-    card.passive   ? { ...card.passive,   _label: 'Passive'   } : null,
-    card.influence ? { ...card.influence, _label: 'Influence' } : null,
-    ...(card.abilities ?? []),
-  ].filter(Boolean) as any[];
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[200] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <motion.div
-        initial={{ opacity: 0, scale: 0.92, y: 12 }}
-        animate={{ opacity: 1, scale: 1,    y: 0  }}
-        exit={{    opacity: 0, scale: 0.94, y: 8  }}
-        transition={{ type: 'spring', stiffness: 320, damping: 26 }}
-        className="bg-[#1c2120] border border-[#a1d0c6]/15 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden max-h-[85vh] flex flex-col"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/6 shrink-0">
-          <div className="flex items-center gap-2">
-            <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${TYPE_BORDER[card.type]}`}>{card.type}</span>
-            <span className={`text-[9px] font-mono ${RARITY_COL[card.rarity]}`}>{card.rarity}</span>
-            <span className="text-[9px] font-mono text-[#c0c8c5]/25">{card.id}</span>
-          </div>
-          <button onClick={onClose} className="text-[#c0c8c5]/40 hover:text-[#dfe3e1] transition-colors text-lg leading-none px-1">×</button>
-        </div>
-
-        <div className="flex overflow-y-auto flex-1">
-          {/* Art strip */}
-          <div className={`w-32 shrink-0 bg-gradient-to-br ${moodG(card)} flex flex-col justify-end p-3`}>
-            <p className="text-[9px] italic text-[#c0c8c5]/40 leading-snug">{card.illustration}</p>
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 p-4 space-y-3 overflow-y-auto min-w-0">
-            <div>
-              <h2 className="text-xl font-black text-[#dfe3e1] leading-tight">{card.name}</h2>
-              {card.subtype && <p className="text-[10px] text-[#c0c8c5]/40 uppercase tracking-widest mt-0.5">{card.subtype}</p>}
-            </div>
-
-            {/* Stats chips */}
-            <div className="flex flex-wrap gap-1.5">
-              {card.type === 'creator' && <>
-                <span className="stat-chip">♥ {card.loyalty} Loyalty</span>
-                {card.startingBonus && <span className="stat-chip">{card.startingBonus.display}</span>}
-              </>}
-              {card.type === 'model' && <>
-                <span className="stat-chip">Play {card.playCost ?? 0}Cr</span>
-                <span className="stat-chip">Activate {card.activateCost ?? 0}Cr</span>
-                <span className="stat-chip">Q{card.quality}</span>
-                <span className="stat-chip">RT{card.runtime}</span>
-              </>}
-              {card.cost !== undefined && card.type !== 'creator' && card.type !== 'model' && (
-                <span className="stat-chip">{card.cost}{card.costType === 'reputation' ? ' Rep' : ' Cr'}</span>
-              )}
-              {card.timing   && <span className="stat-chip">{card.timing}</span>}
-              {card.duration && <span className="stat-chip">{card.duration}</span>}
-            </div>
-
-            {/* Compatibility */}
-            {(card.compatible?.length || card.incompatible?.length) && (
-              <div className="flex flex-wrap gap-1">
-                {card.compatible?.map  (s => <span key={s} className="text-[9px] px-1.5 py-0.5 rounded-full border border-green-500/30 text-green-400 bg-green-500/8">✔ {s}</span>)}
-                {card.incompatible?.map(s => <span key={s} className="text-[9px] px-1.5 py-0.5 rounded-full border border-red-500/30   text-red-400   bg-red-500/8">✘ {s}</span>)}
-              </div>
-            )}
-
-            {/* Effect / Abilities */}
-            {card.effect && (
-              <div className="rounded-xl border border-white/6 bg-[#0d1211]/50 p-3">
-                <div className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/35 font-mono mb-1">Effect</div>
-                <p className="text-xs text-[#c0c8c5]/80 leading-relaxed">{card.effect}</p>
-              </div>
-            )}
-            {abList.map((ab: any, i: number) => {
-              const isSig = ab.num === 'signature';
-              const label = ab._label ?? (isSig ? 'Signature' : `Ability ${ab.num}`);
-              const costParts = [
-                ab.cost?.loyalty    && `${ab.cost.loyalty} Loy`,
-                ab.cost?.reputation && `${ab.cost.reputation} Rep`,
-                ab.cost?.credits    && `${ab.cost.credits} Cr`,
-              ].filter(Boolean).join(' · ');
-              return (
-                <div key={i} className={`rounded-xl p-3 border ${isSig ? 'border-[#a1d0c6]/30 bg-[#a1d0c6]/5' : 'border-white/6 bg-[#0d1211]/40'}`}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-black shrink-0 ${isSig ? 'bg-[#a1d0c6] text-[#033730]' : 'bg-[#262b2a] text-[#a1d0c6]'}`}>
-                      {isSig ? '⚡' : ab._label ? '◈' : ab.num}
-                    </span>
-                    <span className="text-[12px] font-bold text-[#dfe3e1]">{ab.name}</span>
-                    {ab._label && <span className="text-[9px] text-[#c0c8c5]/35 font-mono uppercase">{ab._label}</span>}
-                    {costParts && <span className="ml-auto text-[9px] font-mono text-[#c0c8c5]/45 shrink-0">{costParts}</span>}
-                  </div>
-                  <p className="text-[11px] text-[#c0c8c5]/75 leading-relaxed pl-6">{ab.text}</p>
-                  {ab.timing && <span className="text-[8px] font-mono text-[#c0c8c5]/30 uppercase pl-6 mt-0.5 block">{ab.timing}</span>}
-                </div>
-              );
-            })}
-            {card.favouritePrompt && (
-              <div className="rounded-xl border border-[#cebefa]/20 bg-[#cebefa]/5 p-3">
-                <div className="text-[8px] uppercase tracking-widest text-[#cebefa]/45 font-mono mb-1">Favourite Prompt</div>
-                <p className="text-[11px] font-bold text-[#dfe3e1] italic">"{card.favouritePrompt.text}"</p>
-                <p className="text-[10px] text-[#c0c8c5]/50 mt-1">{card.favouritePrompt.effect}</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </motion.div>
-    </div>,
-    document.body
+// ─── Loyalty bar ─────────────────────────────────────────────────
+function LoyaltyBar({val,max,label}:{val:number;max:number;label:string}) {
+  const pct = Math.max(0, Math.min(100, (val/max)*100));
+  const clr = pct>50?'bg-[#a1d0c6]':pct>25?'bg-amber-400':'bg-red-500';
+  return (
+    <div className="flex items-center gap-2 w-full">
+      <span className="text-[9px] text-[#c0c8c5]/50 w-12 shrink-0">{label}</span>
+      <div className="flex-1 bg-[#0d1211] rounded-full h-2 overflow-hidden">
+        <div className={`h-full rounded-full transition-all duration-500 ${clr}`} style={{width:`${pct}%`}} />
+      </div>
+      <span className="text-xs font-bold text-[#dfe3e1] w-8 text-right">{val}</span>
+    </div>
   );
 }
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-const effQ  = (c: Creation) => Math.max(0, c.quality - c.glitchTokens);
-
-const VIS_TIER = (v: number) => v >= 10 ? 'Featured' : v >= 6 ? 'Liked' : v >= 3 ? 'Noticed' : 'Unnoticed';
-const VIS_COL  = (v: number) =>
-  v >= 10 ? 'from-yellow-400/20 to-yellow-400/5 border-yellow-400/40 text-yellow-300'
-  : v >= 6 ? 'from-[#a1d0c6]/20 to-[#a1d0c6]/5 border-[#a1d0c6]/40 text-[#a1d0c6]'
-  : v >= 3 ? 'from-white/8 to-white/3 border-white/15 text-[#c0c8c5]/70'
-  : 'from-white/3 to-transparent border-white/8 text-[#c0c8c5]/30';
-
-const TYPE_COLOR: Record<string, string> = {
-  model:    '#cebefa',
-  prompt:   '#6fcf97',
-  modifier: '#f2994a',
-  artifact: '#bb6bd9',
-  event:    '#56a4f5',
-};
-
-function blankPlayer(id: PlayerId): import('../game-engine').PlayerState {
-  return { id, creator: { cardId: '', loyalty: 10, reputation: 0, isExhausted: false }, hand: [], guaranteedModels: [], deck: [], discard: [], credits: 0, creditCap: 10, field: [], queue: [], remixQueue: null, modifiers: [], mulliganed: false, turnsPlayed: 0 };
+// ─── Tiny vis bar ────────────────────────────────────────────────
+function VisBar({vis}:{vis:number}) {
+  const pct = Math.min(100,(vis/12)*100);
+  const clr = vis>=10?'bg-amber-400':vis>=6?'bg-cyan-400':vis>=3?'bg-teal-500':'bg-[#a1d0c6]/20';
+  return (
+    <div className="w-full bg-[#0d1211] rounded-full h-1 overflow-hidden">
+      <div className={`h-full rounded-full ${clr}`} style={{width:`${pct}%`}} />
+    </div>
+  );
 }
 
-const BLANK: GameState = {
-  human: blankPlayer('human'), ai: blankPlayer('ai'),
-  sharedModels: [], artifactZone: [],
-  turn: 1, round: 1, activePlayer: 'human',
-  phase: 'mulligan', mulliganPhase: { humanDone: false, aiDone: false },
-  winner: null, log: [], abilityUsedThisTurn: [],
-  favouritePromptActive: false,
-};
-
-// ─────────────────────────────────────────────────────────────
-// Sub-components
-// ─────────────────────────────────────────────────────────────
-
-// Health bar (loyalty)
-function HealthBar({ current, max, label, flip = false }: { current: number; max: number; label: string; flip?: boolean }) {
-  const pct = Math.max(0, Math.min(100, (current / Math.max(1, max)) * 100));
-  const segments = max;
-  const col = pct > 50 ? '#a1d0c6' : pct > 25 ? '#f2c94c' : '#eb5757';
-  const glowCol = pct > 50 ? 'rgba(161,208,198,0.25)' : pct > 25 ? 'rgba(242,196,76,0.25)' : 'rgba(235,87,87,0.35)';
+// ─── Creation card ───────────────────────────────────────────────
+function CreationCard({c,onClick,ring,opp}:{c:CreationState;onClick?:()=>void;ring?:boolean;opp?:boolean}) {
+  const eq = effectiveQuality(c);
+  const vis = c.visibilityCounters;
+  const label = vis>=10?'Featured':vis>=6?'Liked':vis>=3?'Noticed':'—';
   return (
-    <div className={`flex items-center gap-2 w-full ${flip ? 'flex-row-reverse' : ''}`}>
-      <span className={`text-[9px] font-mono uppercase tracking-widest text-[#c0c8c5]/40 w-6 shrink-0 ${flip ? 'text-right' : ''}`}>{label}</span>
-      <div className="flex-1 flex items-center gap-0.5 h-4">
-        {Array.from({ length: segments }).map((_, i) => {
-          const filled = flip ? (i >= segments - current) : (i < current);
+    <div
+      onClick={onClick}
+      className={`flex flex-col gap-1 p-2 rounded-xl border cursor-pointer transition-all select-none
+        ${ring?'border-amber-400 bg-amber-400/10 shadow-lg':'border-[#a1d0c6]/20 bg-[#1c2120]/60 hover:border-[#a1d0c6]/40'}
+        ${eq<=0?'border-red-500/60 opacity-60':''}
+        ${c.clipLocked?'ring-1 ring-cyan-400/50':''}
+      `}
+      style={{minWidth:88,maxWidth:108}}
+    >
+      <div className="flex gap-0.5 flex-wrap">
+        {c.clipLocked && <span className="text-[7px] bg-cyan-400/20 text-cyan-400 px-0.5 rounded">CLK</span>}
+        {!c.isOnField && <span className="text-[7px] bg-[#cebefa]/20 text-[#cebefa] px-0.5 rounded">Q{c.runtime}</span>}
+        {c.isInRemixQueue && <span className="text-[7px] bg-orange-400/20 text-orange-400 px-0.5 rounded">RMX</span>}
+        {c.immuneToOpponentUntilAbsTurn>0 && <span className="text-[7px] bg-green-400/20 text-green-400 px-0.5 rounded">IMM</span>}
+        {c.featuredTurnsRemaining>0 && <span className="text-[7px] bg-amber-400/20 text-amber-400 px-0.5 rounded">★FT</span>}
+      </div>
+      <div className="flex items-center gap-1">
+        <span className={`text-sm font-bold ${eq<=0?'text-red-400':eq<=1?'text-amber-400':'text-[#a1d0c6]'}`}>Q{eq}</span>
+        {c.glitchTokens>0 && <span className="text-[9px] text-red-400">⚡{c.glitchTokens}</span>}
+      </div>
+      {c.styleTag && <span className={`text-[8px] font-bold ${STYLE_CLR[c.styleTag]||''}`}>{c.styleTag}</span>}
+      <VisBar vis={vis}/>
+      <div className="flex justify-between">
+        <span className="text-[7px] text-[#c0c8c5]/40">{label}</span>
+        <span className="text-[7px] text-[#a1d0c6]/50">{vis}✦</span>
+      </div>
+      <span className="text-[7px] text-[#c0c8c5]/30 truncate">{getCardById(c.modelId)?.name}</span>
+    </div>
+  );
+}
+
+// ─── Shared model card ───────────────────────────────────────────
+function ModelCard({m,onClick,ring}:{m:ModelState;onClick?:()=>void;ring?:boolean}) {
+  const card = getCardById(m.cardId);
+  if (!card) return null;
+  const used = m.activatedThisTurnBy!==null;
+  return (
+    <div
+      onClick={onClick}
+      className={`flex flex-col gap-1 p-2 rounded-xl border cursor-pointer transition-all select-none
+        ${ring?'border-amber-400 bg-amber-400/10':'border-[#cebefa]/20 bg-[#1c2120]/60 hover:border-[#cebefa]/50'}
+        ${used?'opacity-40':''}
+      `}
+      style={{minWidth:88,maxWidth:108}}
+    >
+      <span className="text-[9px] font-bold text-[#cebefa] leading-tight">{card.name}</span>
+      <div className="flex gap-1 flex-wrap">
+        <span className="text-[7px] bg-[#cebefa]/10 text-[#cebefa]/70 px-1 rounded">Q{card.quality}</span>
+        <span className="text-[7px] bg-[#a1d0c6]/10 text-[#a1d0c6]/70 px-1 rounded">⚡{card.activateCost}¢</span>
+        <span className="text-[7px] text-[#c0c8c5]/40">⧗{card.runtime}</span>
+      </div>
+      {m.loraCardId && <span className="text-[7px] text-amber-400">{getCardById(m.loraCardId)?.name}</span>}
+      {m.noiseTurnsRemaining>0 && <span className="text-[7px] text-red-400">NOISE({m.noiseTurnsRemaining})</span>}
+      {m.queueSkipReady && <span className="text-[7px] text-green-400">SKIP✓</span>}
+      <span className="text-[7px] text-[#c0c8c5]/30">by {m.ownerId}</span>
+      {used && <span className="text-[7px] text-[#c0c8c5]/30">activated</span>}
+    </div>
+  );
+}
+
+// ─── Hand card ───────────────────────────────────────────────────
+function HandCard({id,onClick,sel,dim}:{id:string;onClick?:()=>void;sel?:boolean;dim?:boolean}) {
+  const card = getCardById(id);
+  if (!card) return null;
+  const border: Record<string,string> = {
+    model:'border-[#cebefa]/40 hover:border-[#cebefa]/80',
+    prompt:'border-green-500/40 hover:border-green-500/80',
+    modifier:'border-amber-500/40 hover:border-amber-500/80',
+    artifact:'border-purple-500/40 hover:border-purple-500/80',
+    event:'border-blue-500/40 hover:border-blue-500/80',
+  };
+  return (
+    <div
+      onClick={onClick}
+      title={`${card.name} — ${card.effect||card.type}`}
+      className={`relative flex flex-col gap-1 p-2 rounded-xl border cursor-pointer transition-all select-none
+        ${sel?'border-amber-400 bg-amber-400/10 scale-105 shadow-lg':border[card.type]||'border-[#a1d0c6]/20'}
+        ${dim?'opacity-30 pointer-events-none':''}
+        bg-[#1c2120]/60
+      `}
+      style={{minWidth:68,maxWidth:82,minHeight:88}}
+    >
+      <span className="text-[7px] uppercase tracking-wider text-[#c0c8c5]/40 font-bold">{card.type}</span>
+      <span className="text-[9px] font-bold text-[#dfe3e1] leading-tight line-clamp-2">{card.name}</span>
+      <span className="text-[7px] text-[#a1d0c6]/60">{card.cost??0}{card.costType==='reputation'?'★':'¢'}</span>
+      {card.type==='model' && <span className="text-[7px] text-[#cebefa]/50">Q{card.quality} ⧗{card.runtime}</span>}
+      {card.promptType && <span className="text-[7px] text-green-400/70">{card.promptType}</span>}
+    </div>
+  );
+}
+
+// ─── Creator abilities panel ─────────────────────────────────────
+function AbilitiesPanel({
+  creatorId, playerState, isMyTurn,
+  onAbility, onClose,
+}: {
+  creatorId: string;
+  playerState: GameState['players']['player'];
+  isMyTurn: boolean;
+  onAbility: (num: number|'signature') => void;
+  onClose: () => void;
+}) {
+  const card = getCardById(creatorId);
+  if (!card) return null;
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-[#1c2120] border border-[#a1d0c6]/20 rounded-2xl p-5 max-w-md w-full mx-4 shadow-2xl flex flex-col gap-3"
+        onClick={e=>e.stopPropagation()}
+        style={{animation:'fadeIn .2s ease'}}
+      >
+        <div className="flex justify-between items-center">
+          <h2 className="font-bold text-[#dfe3e1] text-lg">{card.name}</h2>
+          <button onClick={onClose} className="text-[#c0c8c5]/40 hover:text-[#dfe3e1] text-xl leading-none">✕</button>
+        </div>
+        <div className="flex gap-3 text-xs text-[#c0c8c5]/60">
+          <span>★ {playerState.reputation}/20</span>
+          <span>❤ {playerState.loyalty}</span>
+          {playerState.creatorExhaustedThisTurn && <span className="text-red-400">EXHAUSTED this turn</span>}
+          {playerState.mods.ban && <span className="text-red-400">BANNED</span>}
+        </div>
+
+        {card.passive && (
+          <div className="p-3 bg-[#0d1211]/60 rounded-xl border border-[#a1d0c6]/10">
+            <p className="text-[9px] uppercase font-bold text-[#a1d0c6]/50 mb-1">◈ PASSIVE: {card.passive.name}</p>
+            <p className="text-xs text-[#c0c8c5]/70 leading-relaxed">{card.passive.text}</p>
+          </div>
+        )}
+        {card.influence && (
+          <div className="p-3 bg-[#0d1211]/60 rounded-xl border border-[#a1d0c6]/10">
+            <p className="text-[9px] uppercase font-bold text-[#a1d0c6]/50 mb-1">◈ INFLUENCE: {card.influence.name}</p>
+            <p className="text-xs text-[#c0c8c5]/70 leading-relaxed">{card.influence.text}</p>
+          </div>
+        )}
+        {card.favouritePrompt && (
+          <div className="p-3 bg-[#0d1211]/60 rounded-xl border border-green-500/20">
+            <p className="text-[9px] uppercase font-bold text-green-400/50 mb-1">✦ FAV PROMPT ({card.favouritePrompt.subtype})</p>
+            <p className="text-xs italic text-[#c0c8c5]/60">{card.favouritePrompt.text}</p>
+            <p className="text-[9px] text-green-400/70 mt-1">{card.favouritePrompt.effect}</p>
+          </div>
+        )}
+
+        {(card.abilities??[]).map(ab => {
+          const nums = ['','①','②','③'];
+          const label = ab.num==='signature'?'⚡ SIGNATURE':`${nums[Number(ab.num)]??ab.num} ${ab.name}`;
+          const costStr = [
+            ab.cost.reputation ? `${ab.cost.reputation} Rep` : '',
+            ab.cost.loyalty ? `${ab.cost.loyalty} Loyalty` : '',
+            ab.cost.credits ? `${ab.cost.credits} Credits` : '',
+          ].filter(Boolean).join(' + ') || 'Free';
           return (
-            <div key={i} className="flex-1 h-3 rounded-sm transition-all duration-300"
-              style={{
-                backgroundColor: filled ? col : 'rgba(255,255,255,0.06)',
-                boxShadow: filled && i === (flip ? segments - current : current - 1) ? `0 0 6px ${glowCol}` : 'none',
-              }}
-            />
+            <button
+              key={String(ab.num)}
+              onClick={() => { if(isMyTurn) onAbility(ab.num); }}
+              disabled={!isMyTurn}
+              className={`p-3 rounded-xl border text-left transition-all
+                ${ab.num==='signature'?'border-red-500/40 hover:bg-red-500/10':'border-[#a1d0c6]/20 hover:bg-[#a1d0c6]/5'}
+                ${!isMyTurn?'opacity-50 cursor-not-allowed':'cursor-pointer'}
+              `}
+            >
+              <div className="flex justify-between mb-1">
+                <span className="text-xs font-bold text-[#dfe3e1]">{label}</span>
+                <span className="text-[9px] text-amber-400">{costStr}</span>
+              </div>
+              <p className="text-[9px] text-[#c0c8c5]/60 leading-relaxed">{ab.text}</p>
+            </button>
           );
         })}
       </div>
-      <span className={`text-[12px] font-black font-mono shrink-0 w-8 ${flip ? 'text-left' : 'text-right'}`} style={{ color: col }}>
-        {current}
-      </span>
     </div>
   );
 }
 
-// Creation token on the battlefield
-function CreationTile({
-  c, mini = false, onClick, glow, onInfo,
-}: {
-  c: Creation; mini?: boolean; onClick?: () => void; glow?: 'red' | 'teal' | 'none'; onInfo?: () => void;
-}) {
-  const q   = effQ(c);
-  const inQ = c.runtimeLeft > 0;
-  const vc  = VIS_COL(c.visibility);
-
+// ─── Card inspector ──────────────────────────────────────────────
+function Inspector({id,onClose}:{id:string;onClose:()=>void}) {
+  const card = getCardById(id);
+  if(!card) return null;
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, scale: 0.75, y: 12 }}
-      animate={{ opacity: inQ ? 0.55 : 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.6, y: -8 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 24 }}
-      onClick={onClick}
-      whileHover={onClick ? { scale: 1.05, y: -3 } : {}}
-      className={`relative rounded-xl border bg-gradient-to-b flex flex-col items-center select-none
-        ${vc} ${mini ? 'w-20 py-2 px-1 gap-0.5' : 'w-24 py-3 px-2 gap-1'}
-        ${inQ ? 'border-dashed' : ''}
-        ${onClick ? 'cursor-pointer' : ''}
-        ${glow === 'red'  ? 'ring-1 ring-red-400/60 shadow-[0_0_12px_rgba(235,87,87,0.35)]' : ''}
-        ${glow === 'teal' ? 'ring-1 ring-[#a1d0c6]/50 shadow-[0_0_10px_rgba(161,208,198,0.25)]' : ''}
-        ${c.clipLocked ? 'ring-1 ring-blue-400/50' : ''}
-      `}
-    >
-      {inQ && <span className="text-[8px] font-mono text-[#cebefa]/60 uppercase tracking-wide">Queue</span>}
-      {inQ
-        ? <span className="text-2xl font-black opacity-40">⏳</span>
-        : <span className={`font-black leading-none ${mini ? 'text-2xl' : 'text-3xl'} ${q <= 1 ? 'text-red-400' : 'text-[#dfe3e1]'}`}>{q}</span>
-      }
-      {inQ
-        ? <span className="text-[10px] font-mono text-[#cebefa]/70">RT {c.runtimeLeft}</span>
-        : <span className={`text-[8px] font-mono uppercase tracking-wide ${mini ? '' : 'mt-0.5'}`}>{VIS_TIER(c.visibility)} {c.visibility}v</span>
-      }
-      {!inQ && (
-        <div className="w-full mt-0.5">
-          <div className="w-full h-0.5 rounded-full bg-white/10 overflow-hidden">
-            <div className="h-full rounded-full bg-current opacity-60 transition-all duration-500" style={{ width: `${Math.min(100, c.visibility * 8)}%` }} />
-          </div>
-        </div>
-      )}
-      {c.glitchTokens > 0 && (
-        <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center">G{c.glitchTokens}</span>
-      )}
-      {c.clipLocked && (
-        <span className="absolute -top-1.5 -left-1.5 text-[10px]">🔒</span>
-      )}
-      {c.styleTag && (
-        <span className="text-[7px] font-mono uppercase tracking-wider opacity-50 mt-0.5">{c.styleTag}</span>
-      )}
-      {onInfo && (
-        <button
-          onClick={e => { e.stopPropagation(); onInfo(); }}
-          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-[8px] text-white/40 hover:text-white/80 transition-all"
-        >?</button>
-      )}
-    </motion.div>
-  );
-}
-
-// Card in hand
-function HandCard({ card, selected, playable, onClick, onInfo }: {
-  card: Card; selected?: boolean; playable: boolean; onClick: () => void; onInfo?: () => void;
-}) {
-  const accent = TYPE_COLOR[card.type] ?? '#a1d0c6';
-  const cost   = card.type === 'model'
-    ? `P${card.playCost ?? 0} / A${card.activateCost ?? 0}`
-    : card.cost !== undefined ? `${card.cost}${card.costType === 'reputation' ? ' Rep' : ' Cr'}` : '';
-
-  return (
-    <motion.button
-      onClick={playable || selected ? onClick : undefined}
-      whileHover={playable ? { y: -10, scale: 1.06 } : {}}
-      whileTap={playable   ? { scale: 0.94 } : {}}
-      transition={{ type: 'spring', stiffness: 320, damping: 22 }}
-      className={`relative flex flex-col text-left rounded-xl border px-2.5 pt-2 pb-2 w-[90px] shrink-0 gap-1 transition-all duration-150
-        ${selected
-          ? 'border-[#a1d0c6]/80 shadow-[0_0_14px_rgba(161,208,198,0.4)] bg-[#a1d0c6]/10'
-          : playable
-            ? 'border-white/10 hover:border-white/25 bg-[#1c2120]/70 cursor-pointer'
-            : 'border-white/5 bg-[#1c2120]/30 opacity-35 cursor-not-allowed'
-        }`}
-    >
-      {/* Type stripe */}
-      <div className="absolute top-0 inset-x-0 h-[3px] rounded-t-xl" style={{ backgroundColor: accent + '99' }} />
-      {/* Type label */}
-      <span className="text-[8px] uppercase tracking-widest font-mono mt-0.5" style={{ color: accent + 'aa' }}>{card.type}</span>
-      {/* Name */}
-      <span className="text-[11px] font-bold text-[#dfe3e1] leading-tight line-clamp-2 flex-1">{card.name}</span>
-      {/* Cost */}
-      {cost && <span className="text-[9px] font-mono text-[#c0c8c5]/45 mt-auto">{cost}</span>}
-      {/* Model quality badge */}
-      {card.type === 'model' && (
-        <span className="absolute bottom-2 right-2 text-[9px] font-black text-[#cebefa]/60">Q{card.quality}</span>
-      )}
-      {onInfo && (
-        <button
-          onClick={e => { e.stopPropagation(); onInfo(); }}
-          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white/8 hover:bg-white/18 flex items-center justify-center text-[8px] text-[#c0c8c5]/50 hover:text-[#dfe3e1] transition-all"
-          title="View card details"
-        >?</button>
-      )}
-    </motion.button>
-  );
-}
-
-// Guaranteed model badge (set aside, always available)
-function GuaranteedModelBadge({ card, onPlay, canPlay, onInfo }: { card: Card; onPlay: () => void; canPlay: boolean; onInfo?: () => void }) {
-  return (
-    <motion.button
-      onClick={canPlay ? onPlay : undefined}
-      whileHover={canPlay ? { scale: 1.06, y: -3 } : {}}
-      whileTap={canPlay   ? { scale: 0.95 } : {}}
-      className={`relative flex flex-col items-center gap-1 px-2 py-2 rounded-xl border text-center w-20 shrink-0 transition-all
-        ${canPlay
-          ? 'border-[#cebefa]/40 bg-[#cebefa]/6 hover:bg-[#cebefa]/12 cursor-pointer shadow-[0_0_8px_rgba(206,190,250,0.1)]'
-          : 'border-[#cebefa]/10 bg-transparent opacity-40 cursor-not-allowed'
-        }`}
-    >
-      <span className="text-[7px] uppercase tracking-widest text-[#cebefa]/50 font-mono">Guaranteed</span>
-      <span className="text-[10px] font-bold text-[#dfe3e1] leading-tight">{card.name}</span>
-      <span className="text-[8px] font-mono text-[#cebefa]/50">Q{card.quality} · Free</span>
-      {canPlay && <span className="text-[8px] text-[#cebefa]/60">↑ Play</span>}
-      {onInfo && (
-        <button onClick={e => { e.stopPropagation(); onInfo(); }}
-          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white/8 hover:bg-white/18 flex items-center justify-center text-[8px] text-white/35 hover:text-white/70 transition-all"
-        >?</button>
-      )}
-    </motion.button>
-  );
-}
-
-// Favourite prompt badge (usable during activation like a hand prompt)
-function FavouritePromptBadge({ card, selected, canSelect, onToggle, onInfo }: {
-  card: import('../types').Card;
-  selected: boolean;
-  canSelect: boolean;
-  onToggle: () => void;
-  onInfo?: () => void;
-}) {
-  const fp = card.favouritePrompt;
-  if (!fp) return null;
-  return (
-    <motion.button
-      onClick={canSelect ? onToggle : undefined}
-      whileHover={canSelect ? { scale: 1.04, y: -3 } : {}}
-      whileTap={canSelect   ? { scale: 0.96 } : {}}
-      className={`relative flex flex-col items-start gap-0.5 px-2.5 py-2 rounded-xl border text-left w-[110px] shrink-0 transition-all
-        ${selected
-          ? 'border-[#a1d0c6]/70 bg-[#a1d0c6]/12 shadow-[0_0_12px_rgba(161,208,198,0.3)]'
-          : canSelect
-            ? 'border-[#cebefa]/30 bg-[#cebefa]/5 hover:border-[#cebefa]/55 cursor-pointer'
-            : 'border-white/5 opacity-30 cursor-not-allowed'
-        }`}
-    >
-      <div className="w-full h-[2px] rounded-full mb-1 bg-[#cebefa]/50" />
-      <span className="text-[7px] uppercase tracking-widest text-[#cebefa]/50 font-mono">Fav. Prompt · {fp.subtype}</span>
-      <span className="text-[10px] font-bold text-[#dfe3e1] leading-tight italic line-clamp-2">{fp.text}</span>
-      <span className="text-[8px] text-[#c0c8c5]/35 leading-tight mt-0.5 line-clamp-2">{fp.effect}</span>
-      {selected && <span className="text-[8px] text-[#a1d0c6] font-mono mt-0.5">✓ Selected</span>}
-      {onInfo && (
-        <button onClick={e => { e.stopPropagation(); onInfo(); }}
-          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white/8 hover:bg-white/18 flex items-center justify-center text-[8px] text-white/35 hover:text-white/70 transition-all"
-        >?</button>
-      )}
-    </motion.button>
-  );
-}
-
-// Model in shared zone
-function SharedModelCard({ model, canActivate, onActivate, onInfo }: {
-  model: { modelId: string; activatedThisTurn: boolean; placedByPlayer: PlayerId; activationsThisRound: number };
-  canActivate: boolean;
-  onActivate: () => void;
-  onInfo?: () => void;
-}) {
-  const card = CMAP.get(model.modelId);
-  if (!card) return null;
-  return (
-    <motion.button
-      onClick={canActivate ? onActivate : undefined}
-      whileHover={canActivate ? { scale: 1.05, y: -2 } : {}}
-      whileTap={canActivate   ? { scale: 0.96 } : {}}
-      title={canActivate ? `Activate ${card.name} (${card.activateCost ?? 0}Cr)` : model.activatedThisTurn ? 'Already used this turn' : 'Cannot activate now'}
-      className={`relative flex flex-col items-center gap-1 rounded-xl border px-3 py-2 text-center min-w-[80px] transition-all
-        ${model.activatedThisTurn
-          ? 'border-[#cebefa]/8 bg-transparent opacity-25'
-          : canActivate
-            ? 'border-[#cebefa]/40 bg-[#cebefa]/8 hover:bg-[#cebefa]/14 cursor-pointer'
-            : 'border-[#cebefa]/15 bg-transparent opacity-40 cursor-not-allowed'
-        }`}
-    >
-      <span className="text-[8px] uppercase tracking-widest text-[#cebefa]/50 font-mono">Model</span>
-      <span className="text-[11px] font-bold text-[#dfe3e1] leading-tight">{card.name}</span>
-      <div className="flex items-center gap-1.5 text-[9px] font-mono text-[#c0c8c5]/50">
-        <span>Q{card.quality}</span>
-        <span className="opacity-40">·</span>
-        <span>{card.activateCost ?? 0}Cr</span>
-      </div>
-      {model.activationsThisRound > 0 && !model.activatedThisTurn && (
-        <span className="text-[7px] text-orange-400/60 font-mono">+1 RT (contention)</span>
-      )}
-      {model.activatedThisTurn && <span className="text-[8px] text-[#c0c8c5]/30 font-mono">Used</span>}
-      {onInfo && (
-        <button onClick={e => { e.stopPropagation(); onInfo(); }}
-          className="absolute top-1 right-1 w-4 h-4 rounded-full bg-white/8 hover:bg-white/18 flex items-center justify-center text-[8px] text-white/35 hover:text-white/70 transition-all"
-        >?</button>
-      )}
-    </motion.button>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Deck picker screen
-// ─────────────────────────────────────────────────────────────
-
-function DeckPickerScreen({ onStart }: {
-  onStart: (hCreator: string, hDeck: Card[], aCreator: string, aDeck: Card[], diff: Difficulty, deckId: string) => void;
-}) {
-  const prefs = loadPrefs();
-  const [diff, setDiff]       = useState<Difficulty>('medium');
-  const [chosen, setChosen]   = useState<string | null>(prefs.lastUsedId ?? null);
-  const [showBrowser, setShowBrowser] = useState(false);
-  const [previewId, setPreviewId]     = useState<string | null>(null);
-  const [favId, setFavId]             = useState<string | null>(prefs.favouriteId ?? null);
-  const [modalCard, setModalCard]     = useState<import('../types').Card | null>(null);
-
-  // All available decks: prebuilt + custom
-  const store = (() => {
-    try { return JSON.parse(localStorage.getItem('pb_decks') ?? '{"version":1,"decks":[]}'); } catch { return { version: 1, decks: [] }; }
-  })();
-  const customDecks: import('../types').CustomDeck[] = store.decks ?? [];
-
-  // Build unified deck list
-  type AnyDeck = { id: string; name: string; description: string; creator: string | null; guaranteedModels: string[]; cards: Record<string, number>; isCustom: boolean; archetypes?: string[]; difficulty?: string; };
-  const allDecks: AnyDeck[] = [
-    ...PREBUILT_DECKS.map(d => ({ ...d, creator: d.creator, isCustom: false, guaranteedModels: d.guaranteedModels ?? [] })),
-    ...customDecks.map(d => ({ ...d, isCustom: true, archetypes: [], difficulty: 'Custom', guaranteedModels: d.guaranteedModels ?? [] })),
-  ];
-
-  // Resolve deck by id
-  function getDeck(id: string): AnyDeck | undefined {
-    return allDecks.find(d => d.id === id);
-  }
-
-  function expandDeck(d: AnyDeck): Card[] {
-    const out: Card[] = [];
-    for (const gid of d.guaranteedModels) {
-      const c = CMAP.get(gid); if (c) out.push(c);
-    }
-    for (const [id, count] of Object.entries(d.cards)) {
-      const c = CMAP.get(id);
-      if (c && c.type !== 'creator') for (let i = 0; i < count; i++) out.push(c);
-    }
-    return out;
-  }
-
-  function go(deckId: string) {
-    const hd = getDeck(deckId);
-    if (!hd || !hd.creator) return;
-    // AI gets a different deck (opposite prebuilt, or random custom)
-    const others = allDecks.filter(d => d.id !== deckId && d.creator && d.creator !== hd.creator);
-    const ad = others[0] ?? allDecks.find(d => d.id !== deckId) ?? allDecks[0];
-    if (!ad?.creator) return;
-    // Save prefs
-    savePrefs({ ...loadPrefs(), lastUsedId: deckId });
-    onStart(hd.creator, expandDeck(hd), ad.creator, expandDeck(ad), diff, deckId);
-  }
-
-  function toggleFav(id: string) {
-    const newFav = favId === id ? undefined : id;
-    setFavId(newFav ?? null);
-    savePrefs({ ...loadPrefs(), favouriteId: newFav });
-  }
-
-  const lastUsedDeck = chosen ? getDeck(chosen) : null;
-  const favDeck      = favId  ? getDeck(favId)  : null;
-  const previewDeck  = previewId ? getDeck(previewId) : null;
-
-  // Quick deck card
-  function QuickDeckCard({ deck, label, accent }: { deck: AnyDeck; label: string; accent: string }) {
-    const creator = CMAP.get(deck.creator ?? '');
-    const isFav   = favId === deck.id;
-    return (
-      <div className={`relative rounded-2xl border p-4 flex flex-col gap-2 transition-all ${accent}`}>
-        <div className="flex items-start justify-between gap-2">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
+      <div className="bg-[#1c2120] border border-[#a1d0c6]/20 rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl" onClick={e=>e.stopPropagation()}>
+        <div className="flex justify-between mb-3">
           <div>
-            <div className="text-[8px] uppercase tracking-[0.2em] font-mono text-[#c0c8c5]/35 mb-0.5">{label}</div>
-            <div className="text-base font-black text-[#dfe3e1] leading-tight">{deck.name.split(' — ')[0]}</div>
+            <p className="text-[9px] uppercase tracking-widest text-[#a1d0c6]/50">{card.type}{card.subtype?` · ${card.subtype}`:''}</p>
+            <h3 className="text-base font-bold text-[#dfe3e1]">{card.name}</h3>
           </div>
-          <button onClick={() => toggleFav(deck.id)}
-            className={`shrink-0 text-lg transition-colors mt-0.5 ${isFav ? 'text-yellow-400' : 'text-[#c0c8c5]/20 hover:text-yellow-400/60'}`}
-            title={isFav ? 'Remove favourite' : 'Mark as favourite'}
-          >★</button>
+          <button onClick={onClose} className="text-[#c0c8c5]/40 hover:text-[#dfe3e1] text-xl">✕</button>
         </div>
-        {creator && (
-          <div className="flex items-center gap-1.5 text-[10px] text-[#c0c8c5]/40 font-mono">
-            <span>Creator:</span>
-            <span className="text-[#a1d0c6]">{creator.name}</span>
-            <span className="ml-auto">♥{creator.loyalty}</span>
+        {card.keyword && <p className="text-xs italic text-[#a1d0c6]/60 mb-2">"{card.keyword}"</p>}
+        {card.effect && <p className="text-sm text-[#c0c8c5]/80 mb-3 leading-relaxed">{card.effect}</p>}
+        {card.type==='model' && (
+          <div className="flex gap-3 text-xs text-[#c0c8c5]/60 mb-2">
+            <span>Play {card.playCost}¢</span><span>Activate {card.activateCost}¢</span>
+            <span>Q{card.quality}</span><span>⧗{card.runtime}</span>
           </div>
         )}
-        {deck.description && (
-          <p className="text-[10px] text-[#c0c8c5]/40 leading-relaxed line-clamp-2">{deck.description}</p>
+        {card.compatible && (
+          <div className="flex gap-1 flex-wrap mt-2">
+            {card.compatible.map(t=><span key={t} className="text-[8px] bg-green-400/10 text-green-400 px-1.5 py-0.5 rounded">✔ {t}</span>)}
+            {(card.incompatible??[]).map(t=><span key={t} className="text-[8px] bg-red-400/10 text-red-400 px-1.5 py-0.5 rounded">✘ {t}</span>)}
+          </div>
         )}
-        <div className="flex gap-2 mt-1">
-          <button onClick={() => setPreviewId(deck.id)}
-            className="flex-1 py-1.5 rounded-lg border border-white/10 text-[10px] text-[#c0c8c5]/50 hover:border-white/20 hover:text-[#c0c8c5]/80 font-mono transition-all"
-          >Preview</button>
-          <motion.button
-            onClick={() => go(deck.id)}
-            whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-            className="flex-1 py-1.5 rounded-lg bg-[#a1d0c6] text-[#0d1211] text-[11px] font-black hover:bg-[#b5dbd4] transition-all"
-          >Play →</motion.button>
-        </div>
+        {card.flavourText && <p className="text-xs italic text-[#c0c8c5]/40 mt-3 border-t border-[#a1d0c6]/10 pt-3">"{card.flavourText}"</p>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Deck select screen ──────────────────────────────────────────
+function DeckSelect({onStart}:{onStart:(p:string,a:string)=>void}) {
+  const decks = getAllDecks();
+  const meta = loadMeta();
+  const [chosen, setChosen] = useState(meta.lastDeck ?? 'deckA');
+  const [showAll, setShowAll] = useState(false);
+  const [preview, setPreview] = useState<string|null>(null);
+  const [fav, setFav] = useState(meta.favouriteDeck ?? '');
+
+  function markFav(id:string){ setFav(id); saveMeta({...meta,favouriteDeck:id}); }
+
+  function go() {
+    saveMeta({...meta,lastDeck:chosen});
+    const ai = chosen==='deckA'?'deckB':'deckA';
+    onStart(chosen,ai);
+  }
+
+  const deckName = decks.find(d=>d.id===chosen)?.name ?? chosen;
+  const prebuilt = decks.filter(d=>['deckA','deckB'].includes(d.id));
+  const custom = decks.filter(d=>!['deckA','deckB'].includes(d.id));
+
+  function DeckBtn({id}:{id:string}) {
+    const d = decks.find(x=>x.id===id); if(!d) return null;
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          onClick={()=>setChosen(id)}
+          className={`flex-1 p-3 rounded-xl border text-left transition-all ${chosen===id?'border-[#a1d0c6] bg-[#a1d0c6]/10':'border-[#a1d0c6]/10 bg-[#1c2120]/40 hover:border-[#a1d0c6]/30'}`}
+        >
+          <p className="text-sm font-bold text-[#dfe3e1]">{d.name}</p>
+          <p className="text-[9px] text-[#c0c8c5]/40">{d.creator?getCardById(d.creator)?.name:'—'}</p>
+        </button>
+        <button onClick={()=>markFav(id)} className={`text-lg transition-all ${fav===id?'text-amber-400':'text-[#c0c8c5]/20 hover:text-amber-400/60'}`}>⭐</button>
+        <button onClick={()=>setPreview(preview===id?null:id)} className="text-[#a1d0c6]/40 hover:text-[#a1d0c6] text-sm">👁</button>
       </div>
     );
   }
 
-  // Deck browser modal
-  function DeckBrowser() {
-    return createPortal(
-      <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
-        onClick={e => { if (e.target === e.currentTarget) setShowBrowser(false); }}
-      >
-        <motion.div
-          initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-          className="bg-[#1c2120] border border-[#a1d0c6]/12 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
-        >
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/6 shrink-0">
-            <h2 className="text-base font-black text-[#dfe3e1]">All Decks</h2>
-            <button onClick={() => setShowBrowser(false)} className="text-[#c0c8c5]/40 hover:text-[#dfe3e1] text-xl leading-none">×</button>
+  return (
+    <div className="min-h-[calc(100vh-4rem)] flex flex-col items-center justify-center py-16 px-4 gap-6 animate-fade-in">
+      <div className="text-center space-y-1">
+        <h1 className="text-3xl font-bold text-[#dfe3e1]">Choose Your Deck</h1>
+        <p className="text-[#c0c8c5]/50 text-sm">AI takes the opposing starter deck. Custom decks → AI gets Anon starter.</p>
+      </div>
+      <div className="flex flex-col gap-3 w-full max-w-md">
+        {/* Last used */}
+        {meta.lastDeck && (()=>{const d=decks.find(x=>x.id===meta.lastDeck);if(!d)return null;return(
+          <button onClick={()=>setChosen(meta.lastDeck!)} className={`flex items-center gap-3 p-4 rounded-2xl border transition-all ${chosen===meta.lastDeck?'border-[#a1d0c6] bg-[#a1d0c6]/10':'border-[#a1d0c6]/20 bg-[#1c2120]/60 hover:border-[#a1d0c6]/40'}`}>
+            <span className="text-xl">🕑</span>
+            <div className="text-left"><p className="text-[9px] text-[#c0c8c5]/40 uppercase">Last Used</p><p className="font-bold text-[#dfe3e1]">{d.name}</p></div>
+          </button>
+        );})()}
+        {/* Favourite */}
+        {fav && fav!==meta.lastDeck && (()=>{const d=decks.find(x=>x.id===fav);if(!d)return null;return(
+          <button onClick={()=>setChosen(fav)} className={`flex items-center gap-3 p-4 rounded-2xl border transition-all ${chosen===fav?'border-[#a1d0c6] bg-[#a1d0c6]/10':'border-[#a1d0c6]/20 bg-[#1c2120]/60 hover:border-[#a1d0c6]/40'}`}>
+            <span className="text-xl">⭐</span>
+            <div className="text-left"><p className="text-[9px] text-[#c0c8c5]/40 uppercase">Favourite</p><p className="font-bold text-[#dfe3e1]">{d.name}</p></div>
+          </button>
+        );})()}
+        {/* Browse all */}
+        <button onClick={()=>setShowAll(v=>!v)} className="flex items-center gap-3 p-4 rounded-2xl border border-[#a1d0c6]/20 bg-[#1c2120]/60 hover:border-[#a1d0c6]/40 transition-all">
+          <span className="text-xl">📚</span>
+          <div className="text-left flex-1"><p className="text-[9px] text-[#c0c8c5]/40 uppercase">Browse All Decks</p></div>
+          <span className="text-[#a1d0c6]/50">{showAll?'▲':'▼'}</span>
+        </button>
+        {showAll && (
+          <div className="flex flex-col gap-2 pl-2">
+            {[...prebuilt,...custom].map(d=><DeckBtn key={d.id} id={d.id}/>)}
           </div>
-          <div className="overflow-y-auto flex-1 p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {allDecks.filter(d => d.creator).map(deck => {
-              const creator = CMAP.get(deck.creator ?? '');
-              const isFav   = favId === deck.id;
-              const isChosen = chosen === deck.id;
-              return (
-                <div key={deck.id}
-                  className={`rounded-xl border p-3 flex flex-col gap-2 transition-all cursor-pointer ${isChosen ? 'border-[#a1d0c6]/40 bg-[#a1d0c6]/6' : 'border-white/8 bg-[#0d1211]/40 hover:border-white/14'}`}
-                  onClick={() => { setChosen(deck.id); setShowBrowser(false); }}
-                >
-                  <div className="flex items-start gap-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[12px] font-bold text-[#dfe3e1] leading-tight truncate">{deck.name.split(' — ')[0]}</div>
-                      <div className="text-[9px] text-[#c0c8c5]/35 font-mono mt-0.5">{deck.isCustom ? 'Custom' : 'Prebuilt'} · {creator?.name}</div>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button onClick={e => { e.stopPropagation(); toggleFav(deck.id); }}
-                        className={`text-base transition-colors ${isFav ? 'text-yellow-400' : 'text-[#c0c8c5]/20 hover:text-yellow-400/60'}`}
-                      >★</button>
-                      <button onClick={e => { e.stopPropagation(); setPreviewId(deck.id); }}
-                        className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-[#c0c8c5]/40 hover:text-[#c0c8c5]/70 font-mono transition-all"
-                      >?</button>
-                    </div>
-                  </div>
-                  {deck.description && (
-                    <p className="text-[9px] text-[#c0c8c5]/35 leading-relaxed line-clamp-2">{deck.description}</p>
-                  )}
-                  <div className="flex gap-1 flex-wrap">
-                    {(deck.archetypes ?? []).map(a => (
-                      <span key={a} className="text-[7px] px-1.5 py-0.5 rounded-full border border-white/8 text-[#c0c8c5]/30 font-mono">{a}</span>
-                    ))}
-                  </div>
-                  {isChosen && <span className="text-[9px] text-[#a1d0c6] font-mono">✓ Selected</span>}
-                </div>
-              );
-            })}
-            {allDecks.filter(d => d.creator).length === 0 && (
-              <div className="col-span-2 text-center py-8 text-[#c0c8c5]/30 text-sm">No decks found. Build one in the Decks tab first!</div>
-            )}
-          </div>
-          {chosen && (
-            <div className="px-4 py-3 border-t border-white/6 shrink-0">
-              <motion.button onClick={() => { setShowBrowser(false); go(chosen); }}
-                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                className="w-full py-2.5 rounded-xl bg-[#a1d0c6] text-[#0d1211] font-black text-sm"
-              >Play with {getDeck(chosen)?.name.split(' — ')[0]} →</motion.button>
-            </div>
-          )}
-        </motion.div>
-      </div>,
-      document.body
-    );
-  }
-
-  // Deck preview modal
-  function DeckPreview() {
-    if (!previewDeck) return null;
-    const creator = CMAP.get(previewDeck.creator ?? '');
-    const cardCounts = Object.entries(previewDeck.cards)
-      .filter(([id]) => CMAP.get(id)?.type !== 'creator')
-      .sort(([,a],[,b]) => b - a);
-    const typeGroups: Record<string, [string, number][]> = {};
-    for (const [id, cnt] of cardCounts) {
-      const c = CMAP.get(id); if (!c) continue;
-      if (!typeGroups[c.type]) typeGroups[c.type] = [];
-      typeGroups[c.type].push([id, cnt]);
-    }
-    const typeOrder = ['model','prompt','modifier','artifact','event'];
-    return createPortal(
-      <div className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
-        onClick={e => { if (e.target === e.currentTarget) setPreviewId(null); }}
-      >
-        <motion.div
-          initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.94 }}
-          className="bg-[#1c2120] border border-[#a1d0c6]/15 rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden"
-        >
-          <div className="flex items-center justify-between px-4 py-3 border-b border-white/6 shrink-0">
-            <div>
-              <div className="text-base font-black text-[#dfe3e1]">{previewDeck.name.split(' — ')[0]}</div>
-              {creator && <div className="text-[10px] text-[#a1d0c6]/60 font-mono">Creator: {creator.name} · ♥{creator.loyalty}</div>}
-            </div>
-            <button onClick={() => setPreviewId(null)} className="text-[#c0c8c5]/40 hover:text-[#dfe3e1] text-xl">×</button>
-          </div>
-          <div className="overflow-y-auto flex-1 p-4 space-y-3">
-            {/* Guaranteed models */}
-            {previewDeck.guaranteedModels.length > 0 && (
-              <div>
-                <div className="text-[8px] uppercase tracking-widest text-[#cebefa]/45 font-mono mb-1.5">Guaranteed Models</div>
-                <div className="flex gap-2 flex-wrap">
-                  {previewDeck.guaranteedModels.map(id => {
-                    const c = CMAP.get(id);
-                    return c ? (
-                      <button key={id} onClick={() => setModalCard(c)}
-                        className="px-2.5 py-1.5 rounded-lg border border-[#cebefa]/25 bg-[#cebefa]/6 text-[10px] font-bold text-[#dfe3e1] hover:border-[#cebefa]/45 transition-all text-left"
-                      >
-                        <span className="text-[8px] text-[#cebefa]/50 block font-mono">Q{c.quality}</span>
-                        {c.name}
-                      </button>
-                    ) : null;
-                  })}
-                </div>
-              </div>
-            )}
-            {/* Cards by type */}
-            {typeOrder.filter(t => typeGroups[t]).map(type => (
-              <div key={type}>
-                <div className="text-[8px] uppercase tracking-widest font-mono mb-1.5" style={{ color: TYPE_COLOR[type] + 'aa' }}>{type}s</div>
-                <div className="space-y-0.5">
-                  {typeGroups[type].map(([id, cnt]) => {
-                    const c = CMAP.get(id); if (!c) return null;
-                    return (
-                      <button key={id} onClick={() => setModalCard(c)}
-                        className="w-full flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-white/4 transition-all text-left group"
-                      >
-                        <span className="text-[10px] font-mono text-[#c0c8c5]/35 w-4 text-right">×{cnt}</span>
-                        <span className="text-[11px] text-[#dfe3e1] flex-1 truncate">{c.name}</span>
-                        <span className="text-[8px] text-[#c0c8c5]/25 group-hover:text-[#a1d0c6]/50 font-mono transition-colors">view</span>
-                      </button>
-                    );
-                  })}
-                </div>
+        )}
+        {preview && (()=>{const d=decks.find(x=>x.id===preview);if(!d)return null;return(
+          <div className="p-4 rounded-2xl border border-[#a1d0c6]/10 bg-[#1c2120]/60 text-xs">
+            <p className="font-bold text-[#dfe3e1] mb-2">{d.name}</p>
+            {Object.entries(d.cards).slice(0,10).map(([id,cnt])=>(
+              <div key={id} className="flex justify-between text-[#c0c8c5]/60 py-0.5">
+                <span>{getCardById(id)?.name??id}</span><span>×{cnt}</span>
               </div>
             ))}
           </div>
-          <div className="px-4 py-3 border-t border-white/6 flex gap-2 shrink-0">
-            <button onClick={() => { setChosen(previewDeck.id); setPreviewId(null); setShowBrowser(false); }}
-              className="flex-1 py-2 rounded-xl border border-[#a1d0c6]/30 text-[#a1d0c6] text-[11px] font-bold hover:bg-[#a1d0c6]/8 transition-all"
-            >Select This Deck</button>
-            <button onClick={() => go(previewDeck.id)}
-              className="flex-1 py-2 rounded-xl bg-[#a1d0c6] text-[#0d1211] text-[11px] font-black hover:bg-[#b5dbd4] transition-all"
-            >Play Now →</button>
-          </div>
-        </motion.div>
-      </div>,
-      document.body
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // Render
-  const defaultLastUsed = lastUsedDeck ?? (allDecks.find(d => d.id.includes('B') || d.id.includes('b') || d.id.includes('anon')) ?? allDecks[1] ?? allDecks[0]);
-  const defaultFav      = favDeck;
-
-  return (
-    <div className="flex flex-col items-center justify-center gap-8 py-12 min-h-[calc(100vh-5rem)] px-4">
-      <AnimatePresence>
-        {showBrowser && <DeckBrowser />}
-        {previewId   && <DeckPreview />}
-        {modalCard   && <InGameCardModal card={modalCard} onClose={() => setModalCard(null)} />}
-      </AnimatePresence>
-
+        );})()}
+      </div>
       <div className="text-center">
-        <div className="text-[9px] uppercase tracking-[0.25em] text-[#a1d0c6]/35 font-mono mb-2">Quick Duel</div>
-        <h1 className="text-4xl font-black text-[#dfe3e1] tracking-tight">Choose Your Deck</h1>
-        <p className="text-[#c0c8c5]/35 text-sm mt-1.5">You'll face the AI with the opposing deck</p>
-      </div>
-
-      {/* Quick options */}
-      <div className="w-full max-w-lg grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {defaultLastUsed && (
-          <QuickDeckCard
-            deck={defaultLastUsed}
-            label={prefs.lastUsedId ? "Last Used" : "Recommended"}
-            accent="border-[#a1d0c6]/20 bg-[#a1d0c6]/4 hover:border-[#a1d0c6]/35"
-          />
-        )}
-        {defaultFav && defaultFav.id !== defaultLastUsed?.id && (
-          <QuickDeckCard
-            deck={defaultFav}
-            label="★ Favourite"
-            accent="border-yellow-400/20 bg-yellow-400/3 hover:border-yellow-400/35"
-          />
-        )}
-        {!defaultFav && allDecks.filter(d => d.creator && d.id !== defaultLastUsed?.id).slice(0,1).map(deck => (
-          <QuickDeckCard
-            key={deck.id}
-            deck={deck}
-            label="Also Available"
-            accent="border-white/8 bg-transparent hover:border-white/15"
-          />
-        ))}
-      </div>
-
-      {/* Choose another */}
-      <button
-        onClick={() => setShowBrowser(true)}
-        className="flex items-center gap-2 px-5 py-2 rounded-xl border border-white/10 text-[#c0c8c5]/50 text-[11px] font-mono hover:border-white/20 hover:text-[#c0c8c5]/80 transition-all"
-      >
-        <span>⊕</span> Choose another deck ({allDecks.filter(d => d.creator).length} available)
-      </button>
-
-      {/* Difficulty */}
-      <div className="flex flex-col items-center gap-2">
-        <div className="text-[9px] uppercase tracking-widest text-[#c0c8c5]/30 font-mono">AI Difficulty</div>
-        <div className="flex gap-1.5 p-1 rounded-xl border border-white/6 bg-[#1c2120]/40">
-          {(['easy', 'medium', 'hard'] as Difficulty[]).map(d => (
-            <button key={d} onClick={() => setDiff(d)}
-              className={`px-4 py-1.5 rounded-lg text-[11px] font-bold font-mono transition-all
-                ${diff === d ? 'bg-[#a1d0c6] text-[#0d1211]' : 'text-[#c0c8c5]/35 hover:text-[#c0c8c5]/65'}`}
-            >{d}</button>
-          ))}
-        </div>
+        <p className="text-xs text-[#c0c8c5]/40 mb-3">Selected: <strong className="text-[#dfe3e1]">{deckName}</strong></p>
+        <button onClick={go} className="px-8 py-3 bg-[#a1d0c6] text-[#033730] font-bold rounded-xl hover:brightness-110 active:scale-95 transition-all">
+          Start Game →
+        </button>
       </div>
     </div>
   );
 }
 
-
-// ─────────────────────────────────────────────────────────────
-// Mulligan screen
-// ─────────────────────────────────────────────────────────────
-
-function MulliganScreen({ state, onMulligan, onKeep }: {
-  state: GameState;
-  onMulligan: () => void;
-  onKeep: () => void;
-}) {
-  const p = state.human;
-  const creatorCard = CMAP.get(p.creator.cardId);
-  const done = state.mulliganPhase.humanDone;
-
+// ─── Mulligan screen ─────────────────────────────────────────────
+function MulliganScreen({gs,onDecide}:{gs:GameState;onDecide:(m:boolean)=>void}) {
+  const p = gs.players.player;
+  const guaranteed = getAllDecks().find(d=>d.id===gs.playerDeckId)?.guaranteedModels??[];
+  const models = p.hand.filter(id=>guaranteed.includes(id));
+  const others = p.hand.filter(id=>!guaranteed.includes(id));
   return (
-    <div className="flex flex-col items-center justify-center gap-8 py-16 min-h-[calc(100vh-5rem)]">
+    <div className="min-h-[calc(100vh-4rem)] flex flex-col items-center justify-center py-16 px-4 gap-6 animate-fade-in">
       <div className="text-center">
-        <div className="text-[10px] uppercase tracking-[0.25em] text-[#a1d0c6]/40 font-mono mb-2">Game Setup</div>
-        <h1 className="text-3xl font-black text-[#dfe3e1]">Opening Hand</h1>
-        {creatorCard && (
-          <p className="text-[#c0c8c5]/40 text-sm mt-1">Playing as <span className="text-[#a1d0c6]">{creatorCard.name}</span></p>
-        )}
+        <h1 className="text-2xl font-bold text-[#dfe3e1]">Opening Hand</h1>
+        <p className="text-[#c0c8c5]/50 text-sm mt-1">Guaranteed models always stay. Mulligan draws 6 new cards.</p>
       </div>
-
-      {/* Guaranteed models */}
-      <div className="flex flex-col items-center gap-2">
-        <div className="text-[9px] uppercase tracking-widest text-[#cebefa]/40 font-mono">Guaranteed Models (set aside)</div>
-        <div className="flex gap-3">
-          {p.guaranteedModels.map(c => (
-            <div key={c.id} className="px-4 py-2.5 rounded-xl border border-[#cebefa]/25 bg-[#cebefa]/5 text-center">
-              <div className="text-[8px] text-[#cebefa]/40 font-mono uppercase">Model</div>
-              <div className="text-[12px] font-bold text-[#dfe3e1]">{c.name}</div>
-              <div className="text-[9px] text-[#c0c8c5]/40 font-mono">Q{c.quality} · A{c.activateCost}Cr</div>
-            </div>
-          ))}
-        </div>
+      {models.length>0&&<div className="text-center">
+        <p className="text-[9px] text-[#a1d0c6]/60 uppercase tracking-widest mb-2">Guaranteed Models (always kept)</p>
+        <div className="flex gap-2 justify-center flex-wrap">{models.map((id,i)=><HandCard key={i} id={id}/>)}</div>
+      </div>}
+      <div className="text-center">
+        <p className="text-[9px] text-[#c0c8c5]/50 uppercase tracking-widest mb-2">Drawn ({others.length} cards)</p>
+        <div className="flex gap-2 justify-center flex-wrap max-w-xl">{others.map((id,i)=><HandCard key={i} id={id}/>)}</div>
       </div>
-
-      {/* Opening hand */}
-      <div className="flex flex-col items-center gap-3">
-        <div className="text-[9px] uppercase tracking-widest text-[#c0c8c5]/40 font-mono">
-          Your Opening Hand ({p.hand.length} cards)
-        </div>
-        <div className="flex gap-2 flex-wrap justify-center max-w-xl">
-          {p.hand.map((card, i) => (
-            <motion.div
-              key={card.id + i}
-              initial={{ opacity: 0, y: 20, rotateZ: Math.random() * 6 - 3 }}
-              animate={{ opacity: 1, y: 0,  rotateZ: 0 }}
-              transition={{ delay: i * 0.06, type: 'spring', stiffness: 280, damping: 22 }}
-              className={`flex flex-col gap-0.5 px-3 py-2 rounded-xl border w-24 text-left
-                border-white/10 bg-[#1c2120]/70`}
-            >
-              <div className="text-[7px] uppercase font-mono tracking-widest" style={{ color: TYPE_COLOR[card.type] + '99' }}>{card.type}</div>
-              <div className="text-[11px] font-bold text-[#dfe3e1] leading-tight line-clamp-2">{card.name}</div>
-              {card.type === 'model' && <div className="text-[8px] text-[#cebefa]/50 font-mono">Q{card.quality}</div>}
-              {card.cost !== undefined && <div className="text-[8px] text-[#c0c8c5]/40 font-mono">{card.cost}{card.costType === 'reputation' ? 'R' : 'Cr'}</div>}
-            </motion.div>
-          ))}
-        </div>
+      <div className="flex gap-4">
+        <button onClick={()=>onDecide(false)} className="px-6 py-3 border border-[#a1d0c6]/30 text-[#a1d0c6] rounded-xl hover:bg-[#a1d0c6]/10 font-bold transition-all">Keep Hand</button>
+        <button onClick={()=>onDecide(true)} className="px-6 py-3 bg-[#cebefa]/20 text-[#cebefa] border border-[#cebefa]/30 rounded-xl hover:bg-[#cebefa]/30 font-bold transition-all">Mulligan → Draw 6</button>
       </div>
-
-      {!done ? (
-        <div className="flex flex-col items-center gap-3">
-          <p className="text-[#c0c8c5]/50 text-sm text-center max-w-sm">
-            You may mulligan once — shuffle your hand back and draw 6 cards instead.<br/>
-            <span className="text-[#c0c8c5]/30 text-xs">If only you mulligan, the AI gains +2 Credits. If only the AI mulligans, you gain +2 Credits.</span>
-          </p>
-          <div className="flex gap-3">
-            <motion.button
-              onClick={onMulligan}
-              whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}
-              className="px-6 py-2.5 rounded-xl border border-[#c0c8c5]/20 text-[#c0c8c5]/70 text-sm font-bold hover:border-[#c0c8c5]/40 hover:text-[#c0c8c5] transition-all"
-            >Mulligan (draw 6)</motion.button>
-            <motion.button
-              onClick={onKeep}
-              whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.97 }}
-              className="px-8 py-2.5 rounded-xl bg-[#a1d0c6] text-[#0d1211] text-sm font-black shadow-[0_4px_16px_rgba(161,208,198,0.25)]"
-            >Keep Hand →</motion.button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center gap-2">
-          <div className="px-4 py-2 rounded-xl border border-[#a1d0c6]/30 bg-[#a1d0c6]/8 text-[#a1d0c6] text-sm font-bold">
-            ✓ Hand confirmed — waiting for AI…
-          </div>
-          <motion.div animate={{ opacity: [0.3, 0.8, 0.3] }} transition={{ repeat: Infinity, duration: 1.5 }}
-            className="text-[11px] text-[#c0c8c5]/30 font-mono"
-          >AI is deciding…</motion.div>
-        </div>
-      )}
+      <p className="text-[9px] text-[#c0c8c5]/30">AI is deciding…</p>
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Game over
-// ─────────────────────────────────────────────────────────────
-
-function GameOverScreen({ winner, onRematch }: { winner: PlayerId | 'draw' | null; onRematch: () => void }) {
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-      className="fixed inset-0 bg-[#0d1211]/95 backdrop-blur-sm flex items-center justify-center z-50"
-    >
-      <motion.div initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: 'spring', stiffness: 240, damping: 22, delay: 0.1 }}
-        className="text-center space-y-5 px-8"
-      >
-        <div className={`text-7xl font-black tracking-tighter ${winner === 'human' ? 'text-[#a1d0c6]' : winner === 'ai' ? 'text-red-400' : 'text-[#cebefa]'}`}>
-          {winner === 'human' ? 'You Win' : winner === 'ai' ? 'AI Wins' : 'Draw'}
-        </div>
-        <p className="text-[#c0c8c5]/40">
-          {winner === 'human' ? 'Beautifully played.' : winner === 'ai' ? 'The heuristic got the better of you this time.' : 'Both creators fell simultaneously.'}
-        </p>
-        <button onClick={onRematch}
-          className="px-8 py-3 rounded-xl bg-[#a1d0c6] text-[#0d1211] font-black text-sm hover:bg-[#b5dbd4] transition-colors"
-        >Play Again</button>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Main game board
-// ─────────────────────────────────────────────────────────────
-
-type UIMode = 'idle' | 'awaiting_target' | 'prompts_selected';
-
+// ─────────────────────────────────────────────────────────────────
+// MAIN COMPONENT
+// ─────────────────────────────────────────────────────────────────
 export default function ArenaBattlefield() {
-  const [started, setStarted]   = useState(false);
-  const [difficulty, setDiff]   = useState<Difficulty>('medium');
-  const [state, dispatch]       = useReducer((s: GameState, a: GameAction) => gameReducer(s, a, CMAP), BLANK);
-  const [uiMode, setUIMode]     = useState<UIMode>('idle');
-  const [modalCard, setModalCard] = useState<import('../types').Card | null>(null);
-  const [pendingAbility, setPendingAbility] = useState<number | 'signature' | null>(null);
-  const [selectedPrompts, setSelectedPrompts] = useState<string[]>([]);
-  const [msg, setMsg]           = useState('');
-  const logRef                  = useRef<HTMLDivElement>(null);
-  const aiRunning               = useRef(false);
+  const [gs, setGs] = useState<GameState|null>(null);
+  const [pending, setPending] = useState<PendingAction|null>(null);
+  const [inspected, setInspected] = useState<string|null>(null);
+  const [creatorOpen, setCreatorOpen] = useState(false);
+  const [notif, setNotif] = useState<string|null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
 
-  function flash(m: string, duration = 2500) {
-    setMsg(m);
-    setTimeout(() => setMsg(x => x === m ? '' : x), duration);
+  useEffect(()=>{logRef.current?.scrollTo({top:9999,behavior:'smooth'});},[gs?.log]);
+
+  function notify(msg:string){ setNotif(msg); setTimeout(()=>setNotif(null),2500); }
+
+  function upd(s:GameState){ setGs(s); return s; }
+
+  // After player ends turn, run AI
+  function runAiAfter(state:GameState) {
+    if(state.phase!=='playing'||state.currentPlayer!=='ai') return;
+    setTimeout(()=>{
+      setGs(s=>{
+        if(!s||s.currentPlayer!=='ai') return s;
+        let a = runAiTurn(s);
+        // After AI done, run player's refresh if it's now player's turn
+        if(a.phase==='playing'&&a.currentPlayer==='player'&&a.turnPhase==='refresh') a=runRefreshPhase(a);
+        return a;
+      });
+    },700);
   }
 
-  // ── AI mulligan (instant) + AI turns ─────────────────────────
-  // AI mulligan: fires once when mulliganPhase.aiDone becomes false
-  useEffect(() => {
-    if (!started) return;
-    if (state.phase !== 'mulligan') return;
-    if (state.mulliganPhase.aiDone) return;
-    const timer = setTimeout(() => {
-      dispatch({ type: 'KEEP_HAND', player: 'ai' });
-    }, 900);
-    return () => clearTimeout(timer);
-  }, [started, state.phase, state.mulliganPhase.aiDone]);
+  function startGame(p:string,a:string){ upd(initGame(p,a)); }
 
-  // AI turn: fires only when it becomes the AI's main phase turn
-  useEffect(() => {
-    if (!started) return;
-    if (state.phase !== 'main') return;
-    if (state.activePlayer !== 'ai') return;
-    if (aiRunning.current) return;
+  function handleMulligan(doM:boolean){
+    if(!gs) return;
+    let s = applyMulligan(gs,'player',doM);
+    s = aiDecideMulligan(s);
+    if(s.phase==='playing'){
+      s = runRefreshPhase(s);
+      if(s.currentPlayer==='ai') runAiAfter(s);
+    }
+    upd(s);
+  }
 
-    aiRunning.current = true;
-    const ai   = createAI(difficulty);
-    // Snapshot the state at turn start — do NOT close over live state
-    const snap = state;
-    let endTurnDispatched = false;
+  function endTurn(){
+    if(!gs||gs.currentPlayer!=='player') return;
+    const p = gs.players.player;
+    if(p.hand.length>7){ setPending({kind:'discard',count:p.hand.length-7,selected:[]}); return; }
+    let s = runEndPhase(gs);
+    if(s.phase==='gameover'){ upd(s); return; }
+    if(s.slotOverflowPending){ upd(s); return; }
+    s = runRefreshPhase(s);
+    upd(s);
+    runAiAfter(s);
+  }
 
-    (async () => {
-      try {
-        await sleep(600);
-        const plan = ai.planFullTurn(snap, ALL_CARDS);
-        for (const action of plan) {
-          await sleep(500 + Math.random() * 400);
-          let ga: GameAction | null = null;
-          switch (action.type) {
-            case 'PLAY_MODEL': {
-              const isGuaranteed = snap.ai.guaranteedModels?.some(c => c.id === action.cardId);
-              ga = isGuaranteed
-                ? { type: 'PLAY_GUARANTEED_MODEL', player: 'ai', cardId: action.cardId! }
-                : { type: 'PLAY_MODEL',             player: 'ai', cardId: action.cardId! };
-              break;
-            }
-            case 'ACTIVATE_MODEL':      ga = { type: 'ACTIVATE_MODEL',      player: 'ai', modelId: action.cardId!, promptIds: action.promptIds ?? [] }; break;
-            case 'USE_CREATOR_ABILITY': ga = { type: 'USE_CREATOR_ABILITY', player: 'ai', abilityNum: action.abilityNum! }; break;
-            case 'PLAY_MODIFIER':       ga = { type: 'PLAY_MODIFIER',       player: 'ai', cardId: action.cardId!, targetId: action.targetId ?? 'creator' }; break;
-            case 'PLAY_ARTIFACT':       ga = { type: 'PLAY_ARTIFACT',       player: 'ai', cardId: action.cardId! }; break;
-            case 'PLAY_EVENT':          ga = { type: 'PLAY_EVENT',          player: 'ai', cardId: action.cardId! }; break;
-            case 'END_TURN':
-              ga = { type: 'END_TURN', player: 'ai' };
-              endTurnDispatched = true;
-              break;
-          }
-          if (ga) dispatch(ga);
-          if (action.type === 'END_TURN') break;
-        }
-        // Safety END_TURN only if the loop didn't already dispatch one
-        if (!endTurnDispatched) {
-          await sleep(300);
-          dispatch({ type: 'END_TURN', player: 'ai' });
-        }
-      } finally {
-        aiRunning.current = false;
+  function confirmDiscard(){
+    if(!gs) return;
+    const pa = pending as {kind:'discard';count:number;selected:string[]}|null;
+    if(!pa||pa.kind!=='discard'||pa.selected.length!==pa.count){ notify(`Select ${pa?.count??0} card(s).`); return; }
+    let p = {...gs.players.player};
+    for(const id of pa.selected){const i=p.hand.indexOf(id);if(i!==-1){p.hand=[...p.hand.slice(0,i),...p.hand.slice(i+1)];p.discard=[...p.discard,id];}}
+    let s={...gs,players:{...gs.players,player:p}};
+    setPending(null);
+    s=runEndPhase(s);
+    if(s.phase==='gameover'){upd(s);return;}
+    s=runRefreshPhase(s);
+    upd(s);
+    runAiAfter(s);
+  }
+
+  function resolveOverflow(existingId?:string){
+    if(!gs) return;
+    const s=resolveSlotOverflow(gs,existingId);
+    setPending(null);
+    upd(s);
+  }
+
+  // ── Hand card click ──────────────────────────────────────────────
+  function onHandCard(id:string){
+    if(!gs||gs.currentPlayer!=='player') return;
+    const card=getCardById(id);
+    if(!card) return;
+
+    if(pending?.kind==='discard'){
+      const pa=pending;
+      const already=pa.selected.includes(id);
+      const sel=already?pa.selected.filter(x=>x!==id):pa.selected.length<pa.count?[...pa.selected,id]:pa.selected;
+      setPending({...pa,selected:sel}); return;
+    }
+    if(pending?.kind==='activate'){
+      if(card.type!=='prompt'){notify('Select prompt cards during activation.');return;}
+      const pa=pending;
+      if(pa.prompts.includes(id)){setPending({...pa,prompts:pa.prompts.filter(x=>x!==id)});return;}
+      const usedSubs=pa.prompts.map(x=>getCardById(x)?.promptType??'');
+      const sub=card.promptType??'';
+      if(usedSubs.includes(sub)){notify(`Already using a ${sub} prompt.`);return;}
+      if(pa.prompts.length>=2){notify('Max 2 prompts.');return;}
+      setPending({...pa,prompts:[...pa.prompts,id]}); return;
+    }
+
+    switch(card.type){
+      case 'model': {
+        const cost=card.playCost??0;
+        if(gs.players.player.credits<cost){notify('Not enough credits.');return;}
+        upd(playModel(gs,id)); break;
       }
-    })();
-  // Only re-run when it genuinely becomes the AI's turn (activePlayer flips to 'ai')
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, state.activePlayer, state.phase]);
-
-  // Log scroll
-  useEffect(() => { if (logRef.current) logRef.current.scrollTop = 0; }, [state.log.length]);
-
-  // ── Not started ───────────────────────────────────────────────
-  if (!started) {
-    return (
-      <DeckPickerScreen onStart={(hc, hd, ac, ad, diff) => {
-        setDiff(diff);
-        setStarted(true);
-        aiRunning.current = false;
-        const fp: PlayerId = Math.random() < 0.5 ? 'human' : 'ai';
-        dispatch({ type: 'START_GAME', humanCreatorId: hc, humanDeck: hd, aiCreatorId: ac, aiDeck: ad, firstPlayer: fp });
-      }} />
-    );
+      case 'prompt': notify('Click a model in the shared zone first, then add prompts.'); break;
+      case 'modifier': setPending({kind:'play-modifier',cardId:id}); break;
+      case 'artifact': setPending({kind:'play-artifact',cardId:id}); break;
+      case 'event':
+        if(gs.round<2&&id!=='E-001'){notify('Events cannot be played in Round 1.');return;}
+        setPending({kind:'play-event',cardId:id}); break;
+    }
   }
 
-  // ── Mulligan phase ────────────────────────────────────────────
-  if (state.phase === 'mulligan') {
-    return (
-      <MulliganScreen
-        state={state}
-        onMulligan={() => dispatch({ type: 'MULLIGAN',    player: 'human' })}
-        onKeep={    () => dispatch({ type: 'KEEP_HAND',   player: 'human' })}
-      />
-    );
+  // ── Shared model click ──────────────────────────────────────────
+  function onModel(m:ModelState){
+    if(!gs) return;
+    if(pending?.kind==='play-modifier'){
+      const card=getCardById(pending.cardId);
+      if(card?.modifierType==='LoRA'||card?.modifierType==='Model'){
+        upd(playModifier(gs,pending.cardId,m.instanceId,'model')); setPending(null); return;
+      }
+    }
+    if(pending?.kind==='play-event'){
+      upd(playEvent(gs,pending.cardId,m.instanceId)); setPending(null); return;
+    }
+    if(gs.currentPlayer!=='player'){notify('Not your turn.');return;}
+    if(m.activatedThisTurnBy!==null){notify('Already activated this turn.');return;}
+    if(m.ownerId!=='player'&&gs.round<2){notify('Cannot activate opponent models in Round 1.');return;}
+    if(gs.players.player.queue.length>=2){notify('Queue full (max 2).');return;}
+    setPending({kind:'activate',modelInstanceId:m.instanceId,prompts:[],useFav:false});
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Game board
-  // ─────────────────────────────────────────────────────────────
-
-  const isMyTurn    = state.activePlayer === 'human' && state.phase === 'main';
-  const humanP      = state.human;
-  const aiP         = state.ai;
-  const hCreatorCard = CMAP.get(humanP.creator.cardId);
-  const aCreatorCard = CMAP.get(aiP.creator.cardId);
-  const aiThinking  = state.activePlayer === 'ai' && state.phase === 'main';
-
-  function endTurn() {
-    if (!isMyTurn) { flash("It's not your turn yet"); return; }
-    setUIMode('idle'); setSelectedPrompts([]);
-    dispatch({ type: 'END_TURN', player: 'human' });
+  function confirmActivation(){
+    if(!gs||pending?.kind!=='activate') return;
+    const s=activateModel(gs,pending.modelInstanceId,pending.prompts,pending.useFav);
+    upd(s); setPending(null);
   }
 
-  function handleHandCard(card: Card) {
-    if (!isMyTurn) { flash("Wait for your turn"); return; }
-    const p = humanP;
-
-    if (card.type === 'model') {
-      if (p.credits < (card.playCost ?? 0)) { flash(`Need ${card.playCost}Cr (you have ${p.credits}Cr)`); return; }
-      dispatch({ type: 'PLAY_MODEL', player: 'human', cardId: card.id });
-      flash(`${card.name} placed in shared zone`);
+  // ── Creation click ──────────────────────────────────────────────
+  function onCreation(c:CreationState,pid:PlayerId){
+    if(!gs) return;
+    if(gs.slotOverflowPending?.playerId==='player'&&pid==='player'){resolveOverflow(c.instanceId);return;}
+    if(pending?.kind==='ability'){
+      const pa=pending;
+      const already=pa.targets.includes(c.instanceId);
+      setPending({...pa,targets:already?pa.targets.filter(x=>x!==c.instanceId):[...pa.targets,c.instanceId]});
       return;
     }
-    if (card.type === 'prompt') {
-      const toggled = selectedPrompts.includes(card.id)
-        ? selectedPrompts.filter(x => x !== card.id)
-        : [...selectedPrompts.slice(-1), card.id];
-      setSelectedPrompts(toggled);
-      setUIMode(toggled.length > 0 || state.favouritePromptActive ? 'prompts_selected' : 'idle');
-      flash(toggled.length > 0 ? `${toggled.length} prompt(s) selected — click a model to activate` : 'Prompt deselected');
-      return;
+    if(pending?.kind==='clip-lock'){
+      if(pid!=='player'){notify('Own creations only.');return;}
+      upd(applyClipLock(gs,c.instanceId)); setPending(null); return;
     }
-    if (card.type === 'modifier') {
-      if (p.credits < (card.cost ?? 0)) { flash(`Need ${card.cost}Cr`); return; }
-      dispatch({ type: 'PLAY_MODIFIER', player: 'human', cardId: card.id, targetId: 'creator' });
-      flash(`${card.name} attached`);
-      return;
+    if(pending?.kind==='remix'){
+      if(pid!=='player'){notify('Own creations only.');return;}
+      if(c.clipLocked){notify('Cannot remix CLIP-LOCKed creation.');return;}
+      const stylePrompt=gs.players.player.hand.find(id=>{const card=getCardById(id);return card?.promptType==='Style'||card?.promptType==='Artist';});
+      upd(remixCreation(gs,c.instanceId,stylePrompt)); setPending(null); return;
     }
-    if (card.type === 'artifact') {
-      if (p.credits < (card.cost ?? 0)) { flash(`Need ${card.cost}Cr`); return; }
-      dispatch({ type: 'PLAY_ARTIFACT', player: 'human', cardId: card.id });
-      flash(`${card.name} placed`);
-      return;
+    if(pending?.kind==='play-event'){upd(playEvent(gs,pending.cardId,c.instanceId));setPending(null);return;}
+    if(pending?.kind==='play-artifact'){upd(playArtifact(gs,pending.cardId,c.instanceId));setPending(null);return;}
+    if(pending?.kind==='play-modifier'){
+      const card=getCardById(pending.cardId);
+      if(card?.modifierType==='Creation'||card?.artifactType==='Anomaly'){
+        upd(playModifier(gs,pending.cardId,c.instanceId,'creation'));setPending(null);return;
+      }
     }
-    if (card.type === 'event') {
-      if (state.round < 2) { flash('Events can\'t be played in Round 1'); return; }
-      if (p.credits < (card.cost ?? 0)) { flash(`Need ${card.cost}Cr`); return; }
-      dispatch({ type: 'PLAY_EVENT', player: 'human', cardId: card.id });
-      flash(`${card.name} resolved`);
-      return;
-    }
+    setInspected(c.modelId);
   }
 
-  function handleModelActivate(modelId: string) {
-    if (!isMyTurn) return;
-    // Build prompt list: hand prompts + fav prompt if toggled
-    const promptList = [...selectedPrompts];
-    if (state.favouritePromptActive && hCreatorCard?.favouritePrompt) {
-      // Fav prompt is identified by a special sentinel id 'FAV_PROMPT'
-      promptList.push('FAV_PROMPT');
+  // ── Creator click ───────────────────────────────────────────────
+  function onCreator(pid:PlayerId){
+    if(!gs) return;
+    if(pending?.kind==='play-modifier'){
+      const card=getCardById(pending.cardId);
+      const forOpponent=pending.cardId==='MO-006';
+      if(forOpponent&&pid==='player'){notify('Ban targets opponent.');return;}
+      if(!forOpponent&&pid==='ai'){notify('This modifier targets your creator.');return;}
+      upd(playModifier(gs,pending.cardId,pid,'creator'));setPending(null);return;
     }
-    dispatch({ type: 'ACTIVATE_MODEL', player: 'human', modelId, promptIds: promptList });
-    if (state.favouritePromptActive) dispatch({ type: 'TOGGLE_FAVOURITE_PROMPT', player: 'human' });
-    setSelectedPrompts([]); setUIMode('idle');
-    flash('Model activated — creation queued!');
+    setCreatorOpen(true);
   }
 
-  function handleFavPromptToggle() {
-    if (!isMyTurn) return;
-    if (!hCreatorCard?.favouritePrompt) return;
-    dispatch({ type: 'TOGGLE_FAVOURITE_PROMPT', player: 'human' });
-    flash(state.favouritePromptActive ? 'Favourite prompt deselected' : `Favourite prompt selected: ${hCreatorCard.favouritePrompt.subtype}`);
+  function execAbility(){
+    if(!gs||pending?.kind!=='ability') return;
+    const s=useCreatorAbility(gs,pending.abilityNum,pending.targets[0],pending.targets.slice(1));
+    upd(s); setPending(null); setCreatorOpen(false);
   }
 
-  function handleAbility(num: number | 'signature') {
-    if (!isMyTurn || !hCreatorCard) return;
-    // Abilities needing targets
-    if (num === 1 && hCreatorCard.id === 'C-001') {
-      if (aiP.field.length === 0) { flash('No opponent creations to target'); return; }
-      setPendingAbility(num); setUIMode('awaiting_target');
-      flash('Click an opponent creation to Overrender'); return;
-    }
-    if (num === 2 && hCreatorCard.id === 'C-001') {
-      const locked = humanP.field.filter(c => c.clipLocked);
-      if (!locked.length) { flash('No CLIP-LOCKed creations'); return; }
-      dispatch({ type: 'USE_CREATOR_ABILITY', player: 'human', abilityNum: num, targetId: locked[0].instanceId });
-      flash('Positive Feedback!'); return;
-    }
-    if (num === 3 && hCreatorCard.id === 'C-001') {
-      if (!humanP.field.length) { flash('No creations on field'); return; }
-      const target = humanP.field.reduce((best, c) => c.visibility > best.visibility ? c : best, humanP.field[0]);
-      dispatch({ type: 'USE_CREATOR_ABILITY', player: 'human', abilityNum: num, targetId: target.instanceId });
-      flash('Iridescent Shift applied!'); return;
-    }
-    dispatch({ type: 'USE_CREATOR_ABILITY', player: 'human', abilityNum: num });
-    flash('Ability used!');
-  }
+  function playArtDirect(id:string){ if(gs){ upd(playArtifact(gs,id)); setPending(null); } }
+  function playEvtDirect(id:string){ if(gs){ upd(playEvent(gs,id)); setPending(null); } }
 
-  function handleCreationClick(c: Creation, owner: PlayerId) {
-    if (uiMode === 'awaiting_target' && owner === 'ai') {
-      dispatch({ type: 'USE_CREATOR_ABILITY', player: 'human', abilityNum: pendingAbility!, targetId: c.instanceId });
-      setUIMode('idle'); setPendingAbility(null); flash('Ability resolved!'); return;
-    }
-    if (owner === 'human' && isMyTurn && hCreatorCard?.id === 'C-001' && !c.clipLocked && c.sourceModelId === 'M-001' && c.runtimeLeft === 0) {
-      dispatch({ type: 'APPLY_CLIP_LOCK', player: 'human', creationId: c.instanceId });
-      flash('CLIP-LOCK applied');
-    }
-  }
+  // ── RENDER ──────────────────────────────────────────────────────
+  if(!gs) return <DeckSelect onStart={startGame}/>;
+  if(gs.phase==='mulligan') return <MulliganScreen gs={gs} onDecide={handleMulligan}/>;
+  if(gs.phase==='gameover') return (
+    <div className="min-h-[calc(100vh-4rem)] flex flex-col items-center justify-center gap-8 animate-fade-in">
+      <h1 className="text-4xl font-bold text-[#dfe3e1]">
+        {gs.winner==='player'?'🎉 You Win!':gs.winner==='ai'?'💀 AI Wins':'🤝 Draw'}
+      </h1>
+      <div className="flex gap-4">
+        <button onClick={()=>{setGs(null);setPending(null);}} className="px-6 py-3 bg-[#a1d0c6] text-[#033730] font-bold rounded-xl hover:brightness-110 transition-all">Play Again</button>
+      </div>
+      <div className="text-xs text-[#c0c8c5]/40 space-y-1 max-w-sm text-center">
+        {gs.log.slice(-5).map(l=><p key={l.id}>{l.msg}</p>)}
+      </div>
+    </div>
+  );
 
-  function cancelMode() { setUIMode('idle'); setPendingAbility(null); setSelectedPrompts([]); }
+  const s=gs;
+  const player=s.players.player;
+  const ai=s.players.ai;
+  const isPlayerTurn=s.currentPlayer==='player';
+  const pGlow=isPlayerTurn?creatorGlowColor(s,'player'):'none';
+  const maxPLoy=getCardById(player.creatorId)?.loyalty??11;
+  const maxALoy=getCardById(ai.creatorId)?.loyalty??16;
 
-  // ─────────────────────────────────────────────────────────────
+  const glowBorder = pGlow==='red'?'border-red-500/70 shadow-[0_0_18px_rgba(239,68,68,0.5)]'
+    :pGlow==='yellow'?'border-amber-400/70 shadow-[0_0_18px_rgba(250,204,21,0.4)]'
+    :'border-[#a1d0c6]/20';
+
   return (
-    <div className="flex flex-col gap-0 py-3 min-h-[calc(100vh-5rem)] relative">
+    <div className="flex flex-col gap-2 pb-4 select-none">
+      {/* Notification */}
+      {notif&&<div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-[#1c2120] border border-amber-400/40 text-amber-400 px-4 py-2 rounded-xl text-sm font-bold shadow-xl">{notif}</div>}
 
-      <AnimatePresence>
-        {state.phase === 'game_over' && (
-          <GameOverScreen winner={state.winner} onRematch={() => { setStarted(false); aiRunning.current = false; }} />
-        )}
-      </AnimatePresence>
+      {/* Inspector */}
+      {inspected&&<Inspector id={inspected} onClose={()=>setInspected(null)}/>}
 
-      <AnimatePresence>
-        {modalCard && <InGameCardModal card={modalCard} onClose={() => setModalCard(null)} />}
-      </AnimatePresence>
+      {/* Creator abilities panel */}
+      {creatorOpen&&(
+        <AbilitiesPanel
+          creatorId={player.creatorId}
+          playerState={player}
+          isMyTurn={isPlayerTurn}
+          onAbility={num=>{ setCreatorOpen(false); setPending({kind:'ability',abilityNum:num,targets:[]}); }}
+          onClose={()=>setCreatorOpen(false)}
+        />
+      )}
 
-      {/* Flash message */}
-      <AnimatePresence>
-        {msg && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            className="fixed top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none px-4 py-2 rounded-full bg-[#1c2120]/95 border border-[#a1d0c6]/25 text-[#dfe3e1] text-[11px] font-mono shadow-lg"
-          >{msg}</motion.div>
-        )}
-      </AnimatePresence>
+      <div className="flex flex-col gap-2 max-w-[1280px] mx-auto w-full px-2">
 
-      {/* ── Turn bar ─────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-3 mb-3 pb-2 border-b border-white/6">
-        <span className="text-[9px] font-mono uppercase tracking-widest text-[#c0c8c5]/30">
-          R{state.round} · T{state.turn}
-        </span>
-        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border transition-all
-          ${isMyTurn
-            ? 'border-[#a1d0c6]/40 bg-[#a1d0c6]/8 text-[#a1d0c6]'
-            : 'border-[#cebefa]/20 bg-[#cebefa]/5 text-[#cebefa]/70'
-          }`}
-        >
-          <span className={`w-1.5 h-1.5 rounded-full ${isMyTurn ? 'bg-[#a1d0c6]' : 'bg-[#cebefa]/50'}`} />
-          {isMyTurn ? 'Your Turn' : aiThinking ? 'AI thinking…' : 'AI Turn'}
-        </div>
-        {uiMode !== 'idle' && (
-          <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-            className="flex items-center gap-2 px-3 py-1 rounded-full border border-yellow-400/30 bg-yellow-400/6 text-yellow-300 text-[10px] font-mono"
-          >
-            {uiMode === 'awaiting_target' ? '🎯 Select target' : `📝 ${selectedPrompts.length} prompt(s) selected — click a model`}
-            <button onClick={cancelMode} className="text-yellow-400/50 hover:text-yellow-400 transition-colors">✕</button>
-          </motion.div>
-        )}
-        <div className="ml-auto flex items-center gap-3 text-[10px] font-mono text-[#c0c8c5]/35">
-          <span>{humanP.deck.length}🂠</span>
-          <span>{humanP.credits}Cr</span>
-        </div>
-      </div>
-
-      {/* ── AI zone ──────────────────────────────────────────────── */}
-      <div className={`px-3 pb-3 mb-1 rounded-xl mx-2 transition-all duration-300 ${state.activePlayer === 'ai' ? 'bg-[#cebefa]/3 border border-[#cebefa]/8' : 'border border-transparent'}`}>
-        {/* AI creator bar */}
-        <div className="flex items-center gap-3 mb-2">
-          <div className="flex flex-col gap-0.5 shrink-0">
-            <span className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/30 font-mono">AI · {aCreatorCard?.name ?? '—'}</span>
-            <HealthBar current={aiP.creator.loyalty} max={aCreatorCard?.loyalty ?? 10} label="AI" flip />
-          </div>
-          <div className="flex items-center gap-2 ml-auto text-[10px] font-mono text-[#c0c8c5]/30">
-            <span>{aiP.creator.reputation}R</span>
-            <span>{aiP.credits}Cr</span>
-            <span>{aiP.hand.length} cards</span>
-          </div>
-        </div>
-
-        {/* AI field */}
-        <div className="flex gap-2 flex-wrap min-h-[88px] items-end">
-          <AnimatePresence>
-            {[...aiP.field, ...aiP.queue].map(c => (
-              <CreationTile key={c.instanceId} c={c}
-                glow={uiMode === 'awaiting_target' && c.runtimeLeft === 0 ? 'red' : 'none'}
-                onClick={() => handleCreationClick(c, 'ai')}
-                onInfo={() => { const mc = CMAP.get(c.sourceModelId); if (mc) setModalCard(mc); }}
-              />
-            ))}
-          </AnimatePresence>
-          {aiP.field.length === 0 && aiP.queue.length === 0 && (
-            <span className="text-[10px] text-[#c0c8c5]/15 italic self-center">No AI creations on field</span>
-          )}
-        </div>
-      </div>
-
-      {/* ── Shared zone ──────────────────────────────────────────── */}
-      <div className="mx-2 py-3 px-3 border-y border-white/6 bg-[#0d1211]/30">
-        <div className="flex flex-col gap-2">
-          <div className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/25 font-mono">— Shared Model Zone —</div>
-          <div className="flex gap-2 flex-wrap items-center min-h-[52px]">
-            {state.sharedModels.length === 0 && (
-              <span className="text-[10px] text-[#c0c8c5]/20 italic">
-                No models in play yet — play a model card or a guaranteed model to start
-              </span>
-            )}
-            {state.sharedModels.map(m => (
-              <SharedModelCard
-                key={m.modelId}
-                model={m}
-                canActivate={isMyTurn && !m.activatedThisTurn && (state.round >= 2 || m.placedByPlayer === 'human') && humanP.credits >= (CMAP.get(m.modelId)?.activateCost ?? 0)}
-                onActivate={() => handleModelActivate(m.modelId)}
-                onInfo={() => { const mc = CMAP.get(m.modelId); if (mc) setModalCard(mc); }}
-              />
-            ))}
-          </div>
-          {state.artifactZone.length > 0 && (
-            <div className="flex gap-1 flex-wrap">
-              {state.artifactZone.map((id, i) => {
-                const c = CMAP.get(id);
-                return c ? <span key={i} className="text-[8px] px-2 py-0.5 rounded border border-[#bb6bd9]/25 bg-[#bb6bd9]/8 text-[#bb6bd9]/70 font-mono">{c.name}</span> : null;
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Player zone ──────────────────────────────────────────── */}
-      <div className={`px-3 pt-3 mx-2 rounded-xl transition-all duration-300 ${isMyTurn ? 'bg-[#a1d0c6]/3 border border-[#a1d0c6]/8' : 'border border-transparent'}`}>
-
-        {/* Player field + creator */}
-        <div className="flex items-start gap-3 mb-3">
-          {/* Creator ability panel */}
-          {hCreatorCard && (
-            <CreatorAbilityPanel
-              card={hCreatorCard}
-              currentReputation={humanP.creator.reputation}
-              currentLoyalty={humanP.creator.loyalty}
-              isExhausted={state.abilityUsedThisTurn.includes('human')}
-              isMyTurn={isMyTurn}
-              onSelectAbility={handleAbility}
-              className="shrink-0"
-            />
-          )}
-
-          {/* Player field */}
-          <div className="flex-1 flex flex-col gap-2">
-            <div className="flex gap-2 flex-wrap min-h-[88px] items-end">
-              <AnimatePresence>
-                {[...humanP.field, ...humanP.queue].map(c => (
-                  <CreationTile
-                    key={c.instanceId} c={c}
-                    glow={c.clipLocked ? 'teal' : 'none'}
-                    onClick={() => handleCreationClick(c, 'human')}
-                  />
-                ))}
-              </AnimatePresence>
-              {humanP.field.length === 0 && humanP.queue.length === 0 && (
-                <span className="text-[10px] text-[#c0c8c5]/15 italic self-center">Play a model, then activate it to generate a creation</span>
-              )}
-            </div>
-            <HealthBar current={humanP.creator.loyalty} max={hCreatorCard?.loyalty ?? 10} label="You" />
-            <div className="flex items-center gap-2 text-[10px] font-mono text-[#c0c8c5]/35">
-              <span className="text-[#a1d0c6]/60">{humanP.creator.reputation} Rep</span>
-              <span>·</span>
-              <span className="text-yellow-400/60">{humanP.credits} Credits</span>
-              <span>·</span>
-              <span>{humanP.deck.length} in deck</span>
-              <span>·</span>
-              <span>{humanP.discard.length} discarded</span>
+        {/* ── AI ZONE ── */}
+        <div className="bg-[#0d1211] border border-red-500/15 rounded-2xl p-3 flex flex-col gap-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-[9px] text-red-400/60 font-bold uppercase">AI — {getCardById(ai.creatorId)?.name}</span>
+            <div className="flex-1"><LoyaltyBar val={ai.loyalty} max={maxALoy} label="Loyalty"/></div>
+            <div className="flex gap-3 text-[9px] text-[#c0c8c5]/50">
+              <span>★{ai.reputation}</span><span>¢{ai.credits}/{ai.creditCap}</span><span>✋{ai.hand.length}</span><span>📚{ai.deck.length}</span>
             </div>
           </div>
-        </div>
-
-        {/* Guaranteed models */}
-        {humanP.guaranteedModels.length > 0 && (
-          <div className="flex flex-col gap-1.5 mb-3">
-            <div className="text-[8px] uppercase tracking-widest text-[#cebefa]/35 font-mono">Guaranteed Models (free to play)</div>
-            <div className="flex gap-2 flex-wrap">
-              {humanP.guaranteedModels.map(c => (
-                <GuaranteedModelBadge
-                  key={c.id} card={c}
-                  canPlay={isMyTurn}
-                  onPlay={() => {
-                    dispatch({ type: 'PLAY_GUARANTEED_MODEL', player: 'human', cardId: c.id });
-                    flash(`${c.name} placed in shared zone (free)`);
-                  }}
-                  onInfo={() => setModalCard(c)}
-                />
+          <div className="flex gap-2 flex-wrap items-start">
+            {/* AI hand face-down */}
+            <div className="flex gap-0.5">
+              {ai.hand.map((_,i)=>(
+                <div key={i} className="w-8 h-10 rounded-lg bg-[#1c2120] border border-[#a1d0c6]/10 flex items-center justify-center">
+                  <span className="text-[6px] text-[#a1d0c6]/20">PB</span>
+                </div>
               ))}
             </div>
+            {/* AI queue */}
+            {ai.queue.map(c=><CreationCard key={c.instanceId} c={c} onClick={()=>setInspected(c.modelId)}/>)}
+            {ai.remixQueue&&<CreationCard c={ai.remixQueue} onClick={()=>setInspected(ai.remixQueue!.modelId)}/>}
+            {/* AI active */}
+            {ai.activeCreations.map(c=>(
+              <CreationCard key={c.instanceId} c={c}
+                ring={pending?.kind==='ability'&&pending.targets.includes(c.instanceId)}
+                onClick={()=>{
+                  if(pending?.kind==='ability'||pending?.kind==='play-event'||pending?.kind==='play-artifact'||pending?.kind==='play-modifier')
+                    onCreation(c,'ai');
+                  else setInspected(c.modelId);
+                }}
+              />
+            ))}
+            {ai.activeCreations.length===0&&ai.queue.length===0&&(
+              <div className="w-20 h-14 rounded-xl border border-dashed border-[#a1d0c6]/10 flex items-center justify-center">
+                <span className="text-[8px] text-[#c0c8c5]/20">empty</span>
+              </div>
+            )}
+            {/* AI creator (clickable to target) */}
+            <div
+              onClick={()=>onCreator('ai')}
+              className={`flex items-center gap-2 px-2 py-1.5 rounded-xl border cursor-pointer transition-all ml-auto
+                ${pending?.kind==='play-modifier'&&pending.cardId==='MO-006'?'border-amber-400 bg-amber-400/10':'border-red-500/15 bg-[#1c2120]/40 hover:border-red-500/30'}
+              `}
+            >
+              <div>
+                <p className="text-[8px] text-red-400/50">AI Creator</p>
+                <p className="text-[9px] font-bold text-[#dfe3e1]">{getCardById(ai.creatorId)?.name}</p>
+              </div>
+              <div className="flex flex-col gap-0.5 text-[7px]">
+                {ai.mods.ban&&<span className="text-red-400">BANNED</span>}
+                {ai.mods.astronaut&&<span className="text-blue-400">🚀{ai.mods.astronaut.turnsRemaining}</span>}
+                {ai.mods.proSub&&<span className="text-amber-400">PRO</span>}
+              </div>
+            </div>
           </div>
-        )}
+        </div>
 
-        {/* Hand */}
-        <div className="flex flex-col gap-1.5 mb-3">
-          <div className="flex items-center justify-between">
-            <div className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/30 font-mono">Hand ({humanP.hand.length})</div>
-            {selectedPrompts.length > 0 && (
-              <div className="text-[9px] text-yellow-300/70 font-mono">
-                {selectedPrompts.length} prompt(s) ready — click a model above to activate
+        {/* ── SHARED ZONE ── */}
+        <div className="bg-[#0d1211]/60 border border-[#a1d0c6]/10 rounded-2xl p-3 flex flex-col gap-2">
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            <span className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/30">Shared Zone — Models & Artifacts</span>
+            <div className="flex gap-2 text-[8px] text-[#c0c8c5]/40">
+              <span>Round {s.round}</span><span>Turn {s.absTurn}</span>
+              <span className={isPlayerTurn?'text-[#a1d0c6] font-bold':'text-orange-400 font-bold'}>
+                {isPlayerTurn?'YOUR TURN':'AI TURN'}
+              </span>
+            </div>
+          </div>
+          {/* Global effects */}
+          <div className="flex gap-1.5 flex-wrap">
+            {s.serverOverloadRounds>0&&<span className="text-[8px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded">SERVER OVERLOAD ({s.serverOverloadRounds}r)</span>}
+            {s.queueTimeoutRounds>0&&<span className="text-[8px] bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded">QUEUE TIMEOUT ({s.queueTimeoutRounds}r)</span>}
+            {s.centaurProblemRounds>0&&<span className="text-[8px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">CENTAUR PROBLEM ({s.centaurProblemRounds}r)</span>}
+            {s.algorithmSwap&&<span className="text-[8px] bg-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded">ALGO SWAP: {s.algorithmSwap.style1}↔{s.algorithmSwap.style2}</span>}
+            {s.dailyChallengeAbstracts&&<span className="text-[8px] bg-orange-400/20 text-orange-300 px-1.5 py-0.5 rounded">CHALLENGE: ABSTRACT</span>}
+            {s.dailyChallengePortraits&&<span className="text-[8px] bg-pink-400/20 text-pink-300 px-1.5 py-0.5 rounded">CHALLENGE: PORTRAIT</span>}
+          </div>
+          {/* Models */}
+          <div className="flex gap-2 flex-wrap">
+            {s.sharedModels.length===0&&<span className="text-[8px] text-[#c0c8c5]/20">No models. Play a model card to add one.</span>}
+            {s.sharedModels.map(m=>(
+              <ModelCard key={m.instanceId} m={m}
+                ring={pending?.kind==='activate'&&pending.modelInstanceId===m.instanceId}
+                onClick={()=>onModel(m)}
+              />
+            ))}
+          </div>
+          {/* Artifacts */}
+          {s.artifacts.length>0&&(
+            <div className="flex gap-2 flex-wrap border-t border-[#a1d0c6]/10 pt-2">
+              {s.artifacts.map(a=>(
+                <div key={a.instanceId} onClick={()=>setInspected(a.cardId)} className="flex items-center gap-2 px-2 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 cursor-pointer hover:bg-purple-500/20">
+                  <span className="text-[8px] text-purple-400">{getCardById(a.cardId)?.name}</span>
+                  <span className="text-[7px] text-[#c0c8c5]/40">{a.turnsRemaining}t</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── PLAYER ZONE ── */}
+        <div className="bg-[#0d1211] border border-[#a1d0c6]/20 rounded-2xl p-3 flex flex-col gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-[9px] text-[#a1d0c6]/80 font-bold uppercase">YOU — {getCardById(player.creatorId)?.name}</span>
+            <div className="flex-1"><LoyaltyBar val={player.loyalty} max={maxPLoy} label="Loyalty"/></div>
+            <div className="flex gap-3 text-[9px] text-[#c0c8c5]/60">
+              <span className="text-amber-400">★{player.reputation}/20</span>
+              <span className="text-[#a1d0c6]">¢{player.credits}/{player.creditCap}</span>
+              <span>📚{player.deck.length}</span>
+            </div>
+          </div>
+
+          <div className="flex gap-3 flex-wrap items-start">
+            {/* Creator card with glow */}
+            <div
+              onClick={()=>onCreator('player')}
+              className={`flex flex-col gap-2 p-3 rounded-2xl border cursor-pointer transition-all
+                ${glowBorder}
+                ${pending?.kind==='play-modifier'&&!['MO-002','MO-003','MO-004','MO-006','MO-008','MO-009','MO-010'].includes(pending.cardId)?'ring-2 ring-amber-400/60':''}
+                bg-[#1c2120]/80
+              `}
+              style={{minWidth:120}}
+            >
+              <p className="text-[8px] text-[#a1d0c6]/50 uppercase font-bold">Creator</p>
+              <p className="text-sm font-bold text-[#dfe3e1]">{getCardById(player.creatorId)?.name}</p>
+              <div className="flex gap-2 text-[8px] flex-wrap">
+                {player.creatorExhaustedThisTurn&&<span className="text-red-400">EXHSTD</span>}
+                {player.mods.ban&&<span className="text-red-400">BANNED</span>}
+                {player.mods.astronaut&&<span className="text-blue-400">🚀{player.mods.astronaut.turnsRemaining}t</span>}
+                {player.mods.proSub&&<span className="text-amber-400">PRO {player.mods.proSub.turnsRemaining}t</span>}
+                {player.mods.trending&&<span className="text-green-400">TREND {player.mods.trending.roundsRemaining}r</span>}
+              </div>
+              {pGlow!=='none'&&(
+                <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold ${pGlow==='red'?'bg-red-500/20 text-red-400':'bg-amber-400/20 text-amber-400'}`}>
+                  {pGlow==='red'?'⚡ ULT READY':'✦ ABILITY'}
+                </span>
+              )}
+              <p className="text-[7px] text-[#c0c8c5]/30">Click for abilities</p>
+            </div>
+
+            {/* Player creations */}
+            <div className="flex flex-col gap-2">
+              {/* Queue */}
+              {(player.queue.length>0||player.remixQueue)&&(
+                <div className="flex gap-2 items-center flex-wrap">
+                  <span className="text-[8px] text-[#c0c8c5]/30">Queue:</span>
+                  {player.queue.map(c=><CreationCard key={c.instanceId} c={c} onClick={()=>onCreation(c,'player')}/>)}
+                  {player.remixQueue&&<CreationCard c={player.remixQueue} onClick={()=>onCreation(player.remixQueue!,'player')}/>}
+                </div>
+              )}
+              {/* Active */}
+              <div className="flex gap-2 flex-wrap">
+                {player.activeCreations.map(c=>(
+                  <CreationCard key={c.instanceId} c={c}
+                    ring={
+                      (pending?.kind==='ability'&&pending.targets.includes(c.instanceId))||
+                      (gs.slotOverflowPending?.playerId==='player')
+                    }
+                    onClick={()=>onCreation(c,'player')}
+                  />
+                ))}
+                {Array.from({length:Math.max(0,3-player.activeCreations.length)}).map((_,i)=>(
+                  <div key={i} className="w-20 h-14 rounded-xl border border-dashed border-[#a1d0c6]/10 flex items-center justify-center">
+                    <span className="text-[8px] text-[#c0c8c5]/20">Slot {player.activeCreations.length+i+1}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Slot overflow */}
+          {s.slotOverflowPending?.playerId==='player'&&(
+            <div className="p-3 bg-red-900/20 border border-red-500/30 rounded-xl">
+              <p className="text-xs text-red-400 font-bold mb-2">⚡ Slot Overflow! Click a creation above to destroy it, or reject the incoming one.</p>
+              <button onClick={()=>resolveOverflow()} className="text-[9px] border border-red-500/30 text-red-400 px-2 py-1 rounded hover:bg-red-500/10">
+                Reject Incoming (−1 Loyalty)
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* ── PENDING ACTION BANNER ── */}
+        {pending&&(
+          <div className="bg-[#1c2120] border border-amber-400/30 rounded-2xl p-3 flex flex-col gap-2">
+            {pending.kind==='activate'&&(
+              <div className="flex items-center gap-3 flex-wrap">
+                <div>
+                  <p className="text-sm font-bold text-amber-400">Activating {getCardById(s.sharedModels.find(m=>m.instanceId===pending.modelInstanceId)?.cardId??'')?.name}</p>
+                  <p className="text-xs text-[#c0c8c5]/50">Click prompt cards in your hand below (max 2, different types)</p>
+                  <div className="flex gap-1 mt-1">{pending.prompts.map(id=><span key={id} className="text-[9px] bg-green-400/20 text-green-400 px-1.5 rounded">{getCardById(id)?.name}</span>)}</div>
+                </div>
+                <div className="flex items-center gap-2 ml-auto">
+                  <label className="flex items-center gap-1 text-[9px] text-[#c0c8c5]/60 cursor-pointer">
+                    <input type="checkbox" checked={pending.useFav} onChange={e=>setPending({...pending,useFav:e.target.checked})} className="accent-amber-400"/>
+                    Fav Prompt
+                  </label>
+                  <button onClick={confirmActivation} className="px-3 py-1.5 bg-[#a1d0c6] text-[#033730] font-bold rounded-lg text-xs">Generate →</button>
+                  <button onClick={()=>setPending(null)} className="px-2 py-1.5 border border-[#a1d0c6]/20 text-[#c0c8c5]/50 rounded-lg text-xs">Cancel</button>
+                </div>
+              </div>
+            )}
+            {pending.kind==='ability'&&(
+              <div className="flex items-center gap-3 flex-wrap">
+                <div>
+                  <p className="text-sm font-bold text-amber-400">Ability: {pending.abilityNum==='signature'?'⚡ Signature':`#${pending.abilityNum}`}</p>
+                  <p className="text-xs text-[#c0c8c5]/50">Click target creation(s) on the board {pending.abilityNum==='signature'?'(up to 3 CLIP-LOCKed)':''}.</p>
+                  <div className="flex gap-1 mt-1">{pending.targets.map((_,i)=><span key={i} className="text-[9px] bg-amber-400/20 text-amber-400 px-1.5 rounded">target {i+1}</span>)}</div>
+                </div>
+                <div className="flex gap-2 ml-auto">
+                  <button onClick={execAbility} className="px-3 py-1.5 bg-amber-400 text-black font-bold rounded-lg text-xs">Confirm</button>
+                  <button onClick={()=>setPending(null)} className="px-2 py-1.5 border border-[#a1d0c6]/20 text-[#c0c8c5]/50 rounded-lg text-xs">Cancel</button>
+                </div>
+              </div>
+            )}
+            {(pending.kind==='play-modifier'||pending.kind==='play-artifact'||pending.kind==='play-event')&&(
+              <div className="flex items-center gap-3 flex-wrap">
+                <div>
+                  <p className="text-sm font-bold text-amber-400">Playing: {getCardById(pending.cardId)?.name}</p>
+                  <p className="text-xs text-[#c0c8c5]/50">Click the target on the board above.</p>
+                </div>
+                <div className="flex gap-2 ml-auto">
+                  {pending.kind==='play-artifact'&&['A-001','A-002','A-004','A-005'].includes(pending.cardId)&&(
+                    <button onClick={()=>playArtDirect(pending.cardId)} className="px-3 py-1.5 bg-purple-400/30 text-purple-300 font-bold rounded-lg text-xs">Play (no target)</button>
+                  )}
+                  {pending.kind==='play-event'&&['E-002','E-007','E-009','E-010'].includes(pending.cardId)&&(
+                    <button onClick={()=>playEvtDirect(pending.cardId)} className="px-3 py-1.5 bg-blue-400/30 text-blue-300 font-bold rounded-lg text-xs">Play (no target)</button>
+                  )}
+                  <button onClick={()=>setPending(null)} className="px-2 py-1.5 border border-[#a1d0c6]/20 text-[#c0c8c5]/50 rounded-lg text-xs">Cancel</button>
+                </div>
+              </div>
+            )}
+            {pending.kind==='discard'&&(
+              <div className="flex items-center gap-3 flex-wrap">
+                <div>
+                  <p className="text-sm font-bold text-red-400">Discard {pending.count} card(s) to end turn</p>
+                  <p className="text-xs text-[#c0c8c5]/50">Click cards below to select ({pending.selected.length}/{pending.count}).</p>
+                </div>
+                <button onClick={confirmDiscard} disabled={pending.selected.length!==pending.count} className="px-3 py-1.5 bg-red-500/30 text-red-300 font-bold rounded-lg text-xs disabled:opacity-40 ml-auto">
+                  Discard & End Turn
+                </button>
+              </div>
+            )}
+            {pending.kind==='clip-lock'&&(
+              <div className="flex items-center gap-3">
+                <p className="text-sm font-bold text-cyan-400">CLIP-LOCK: Click one of your Coherent creations.</p>
+                <button onClick={()=>setPending(null)} className="px-2 py-1.5 border border-[#a1d0c6]/20 text-[#c0c8c5]/50 rounded-lg text-xs ml-auto">Cancel</button>
+              </div>
+            )}
+            {pending.kind==='remix'&&(
+              <div className="flex items-center gap-3">
+                <p className="text-sm font-bold text-orange-400">Remix: Click one of your active (non-CLIP-LOCKed) creations.</p>
+                <button onClick={()=>setPending(null)} className="px-2 py-1.5 border border-[#a1d0c6]/20 text-[#c0c8c5]/50 rounded-lg text-xs ml-auto">Cancel</button>
               </div>
             )}
           </div>
-          <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" style={{ scrollbarWidth: 'thin' }}>
-            {/* Favourite prompt — shown as a special selectable card if creator has one */}
-            {hCreatorCard?.favouritePrompt && (
-              <FavouritePromptBadge
-                card={hCreatorCard}
-                selected={state.favouritePromptActive}
-                canSelect={isMyTurn && state.sharedModels.some(m => !m.activatedThisTurn)}
-                onToggle={handleFavPromptToggle}
-                onInfo={() => setModalCard(hCreatorCard)}
-              />
-            )}
-            {humanP.hand.map((card, idx) => {
-              const p = humanP;
-              let playable = isMyTurn;
-              if (card.type === 'model')    playable = isMyTurn && p.credits >= (card.playCost ?? 0);
-              if (card.type === 'prompt')   playable = isMyTurn && state.sharedModels.some(m => !m.activatedThisTurn);
-              if (card.type === 'modifier') playable = isMyTurn && p.credits >= (card.cost ?? 0);
-              if (card.type === 'artifact') playable = isMyTurn && p.credits >= (card.cost ?? 0);
-              if (card.type === 'event')    playable = isMyTurn && state.round >= 2 && p.credits >= (card.cost ?? 0);
+        )}
+
+        {/* ── HAND + ACTIONS ── */}
+        <div className="bg-[#0d1211] border border-[#a1d0c6]/10 rounded-2xl p-3">
+          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+            <span className="text-[8px] uppercase tracking-widest text-[#c0c8c5]/30">Your Hand ({player.hand.length} cards)</span>
+            <div className="flex gap-2 flex-wrap">
+              {player.creatorId==='C-001'&&!player.clipLockAppliedThisTurn&&isPlayerTurn&&(
+                <button onClick={()=>setPending({kind:'clip-lock'})} className="px-2 py-1.5 text-[9px] border border-cyan-400/30 text-cyan-400 rounded-lg hover:bg-cyan-400/10">🔒 CLIP-LOCK</button>
+              )}
+              {player.activeCreations.length>0&&!player.remixQueue&&isPlayerTurn&&(
+                <button onClick={()=>setPending({kind:'remix'})} className="px-2 py-1.5 text-[9px] border border-orange-400/30 text-orange-400 rounded-lg hover:bg-orange-400/10">🔄 Remix</button>
+              )}
+              {isPlayerTurn?(
+                <button onClick={endTurn} disabled={!!s.slotOverflowPending} className="px-4 py-1.5 text-xs font-bold bg-[#a1d0c6] text-[#033730] rounded-lg hover:brightness-110 active:scale-95 transition-all disabled:opacity-40">
+                  End Turn →
+                </button>
+              ):(
+                <span className="px-4 py-1.5 text-xs text-[#c0c8c5]/30 border border-[#a1d0c6]/10 rounded-lg">AI thinking…</span>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-1.5 flex-wrap">
+            {player.hand.map((id,i)=>{
+              const card=getCardById(id);
+              const isPromptMode=pending?.kind==='activate';
+              const inSel=pending?.kind==='activate'?pending.prompts.includes(id):pending?.kind==='discard'?pending.selected.includes(id):false;
+              const dim=!isPlayerTurn||(isPromptMode&&card?.type!=='prompt');
               return (
-                <HandCard
-                  key={`${card.id}-${idx}`}
-                  card={card}
-                  selected={selectedPrompts.includes(card.id)}
-                  playable={playable}
-                  onClick={() => handleHandCard(card)}
-                  onInfo={() => setModalCard(card)}
-                />
+                <div key={`${id}-${i}`} className="relative">
+                  <HandCard id={id} sel={inSel} dim={dim} onClick={()=>{if(isPlayerTurn)onHandCard(id);else setInspected(id);}}/>
+                  <button onClick={e=>{e.stopPropagation();setInspected(id);}} className="absolute top-0.5 right-0.5 text-[7px] text-[#c0c8c5]/20 hover:text-[#a1d0c6]">👁</button>
+                </div>
               );
             })}
-            {humanP.hand.length === 0 && (
-              <span className="text-[10px] text-[#c0c8c5]/20 italic py-4 px-2">Empty hand</span>
-            )}
+            {player.hand.length===0&&<p className="text-[8px] text-[#c0c8c5]/20">No cards in hand.</p>}
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2 pb-3 border-t border-white/6 pt-2">
-          {uiMode !== 'idle' && (
-            <button onClick={cancelMode}
-              className="px-3 py-1.5 rounded-lg border border-red-400/20 text-red-400/60 text-[10px] font-mono hover:bg-red-400/8 transition-all"
-            >✕ Cancel</button>
-          )}
-          <button
-            onClick={() => { if (isMyTurn) dispatch({ type: 'CONCEDE', player: 'human' }); }}
-            className="px-3 py-1.5 rounded-lg border border-white/8 text-[#c0c8c5]/25 text-[10px] font-mono hover:text-[#c0c8c5]/50 hover:border-white/15 transition-all"
-          >Concede</button>
-          <button
-            onClick={endTurn}
-            disabled={!isMyTurn}
-            className={`ml-auto px-6 py-1.5 rounded-xl text-[12px] font-black transition-all
-              ${isMyTurn
-                ? 'bg-[#a1d0c6] text-[#0d1211] hover:bg-[#b5dbd4] shadow-[0_2px_12px_rgba(161,208,198,0.25)] active:scale-95'
-                : 'bg-white/5 text-white/15 cursor-not-allowed'
-              }`}
-          >End Turn →</button>
+        {/* ── LOG ── */}
+        <div ref={logRef} className="bg-[#0d1211]/60 border border-[#a1d0c6]/10 rounded-2xl p-3 max-h-32 overflow-y-auto">
+          <p className="text-[7px] uppercase tracking-widest text-[#c0c8c5]/30 mb-1.5">Game Log</p>
+          {gs.log.slice(-30).map(e=>(
+            <p key={e.id} className={`text-[8px] leading-relaxed ${
+              e.type==='damage'?'text-red-400/80':e.type==='system'?'text-[#a1d0c6]/60 font-bold':
+              e.type==='effect'?'text-[#cebefa]/70':e.type==='ai'?'text-orange-400/70':'text-[#c0c8c5]/60'
+            }`}>{e.msg}</p>
+          ))}
         </div>
-      </div>
-
-      {/* ── Game log ─────────────────────────────────────────────── */}
-      <div ref={logRef}
-        className="mx-2 mt-2 rounded-xl border border-white/6 bg-[#0d1211]/40 p-3 max-h-28 overflow-y-auto"
-        style={{ scrollbarWidth: 'thin' }}
-      >
-        <div className="text-[7px] uppercase tracking-widest text-[#c0c8c5]/20 font-mono mb-1">Game Log</div>
-        {state.log.slice(0, 80).map(e => (
-          <div key={e.id} className={`text-[9px] font-mono leading-relaxed
-            ${e.type === 'combat' ? 'text-red-400/60' : e.type === 'action' ? 'text-[#a1d0c6]/55' : e.type === 'error' ? 'text-orange-400/80' : 'text-[#c0c8c5]/25'}`}
-          >T{e.turn} {e.text}</div>
-        ))}
-        {state.log.length === 0 && <span className="text-[9px] text-[#c0c8c5]/15 italic">Game starting…</span>}
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { Sword, BookOpen, Library, Users } from 'lucide-react';
 
-interface Props { onNavigate: (tab: string) => void; }
+type Tab = 'home' | 'rules' | 'cards' | 'decks' | 'play';
+interface Props { onNavigate: (tab: Tab) => void; }
 
 export default function LandingHero({ onNavigate }: Props) {
   return (
