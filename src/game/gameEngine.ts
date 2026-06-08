@@ -1175,7 +1175,7 @@ function applyCreatorMod(s: GameState, pid: PlayerId, key: keyof CreatorModifier
 }
 
 // ── Play Artifact ──────────────────────────────────────────────────
-export function playArtifact(s: GameState, cardId: string, targetCreationId?: string): GameState {
+export function playArtifact(s: GameState, cardId: string, targetCreationId?: string, swapStyles?: [StyleTag, StyleTag]): GameState {
   let state = s;
   const pid = state.currentPlayer;
   const card = getCardById(cardId);
@@ -1228,16 +1228,12 @@ export function playArtifact(s: GameState, cardId: string, targetCreationId?: st
       state = { ...state, serverOverloadRounds: 3 };
       state = addLog(state, `Server Overload! All activations +1 Credit, Creations generate less Visibility.`, 'effect');
       break;
-    case 'A-006': // Algorithm Swap
-      // Let player choose via UI — for now set pending state
-      // Actually, we need style tags from the caller. This would be passed as extra params.
-      // For simplicity, swap Fantasy and Portrait (most common)
-      state = {
-        ...state,
-        algorithmSwap: { style1: 'Fantasy', style2: 'Portrait', expiresAbsTurn: state.absTurn + 1 }
-      };
-      state = addLog(state, `Algorithm Swap! Fantasy and Portrait styles are swapped until next turn.`, 'effect');
+    case 'A-006': { // Algorithm Swap — requires 2 style tags from UI
+      const [s1, s2] = swapStyles ?? ['Fantasy', 'Portrait'];
+      state = { ...state, algorithmSwap: { style1: s1, style2: s2, expiresAbsTurn: state.absTurn + 2 } };
+      state = addLog(state, `Algorithm Swap! ${s1} ↔ ${s2} styles swapped until next turn.`, 'effect');
       break;
+    }
   }
   return state;
 }
