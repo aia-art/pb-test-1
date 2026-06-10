@@ -472,12 +472,16 @@ export function runRefreshPhase(s: GameState): GameState {
   state = updPlayer(state, pid, pAfter);
 
   // Step 1 — Gain 5 Credits + carryover
+  // SKIP on the player's very first turn — starting credits were already set by finishMulligan.
+  // From turn 2 onwards, gain 5 credits per turn (+ PRO Sub bonus).
   p = { ...state.players[pid] };
-  const baseGain = 5;
-  let proBonus = 0;
-  if (p.mods.proSub) proBonus = 1;
-  p.credits = Math.min(p.creditCap, p.credits + baseGain + proBonus);
-  state = updPlayer(state, pid, p);
+  if (p.hasHadFirstTurn) {
+    const baseGain = 5;
+    let proBonus = 0;
+    if (p.mods.proSub) proBonus = 1;
+    p.credits = Math.min(p.creditCap, p.credits + baseGain + proBonus);
+    state = updPlayer(state, pid, p);
+  }
 
   // Step 2 — Reduce Runtime for all queue creations
   p = { ...state.players[pid] };

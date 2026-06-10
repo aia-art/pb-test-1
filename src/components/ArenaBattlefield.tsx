@@ -127,6 +127,20 @@ type PA =
   | { kind:'styles';   cardId:string; chosen:StyleTag[] }
   | { kind:'discard';  count:number; selected:string[] };
 
+// ─── Long-press hook ──────────────────────────────────────────
+function useLongPress(onLong: () => void, onShort?: () => void, ms = 450) {
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const fired = useRef(false);
+  const start = () => { fired.current = false; timer.current = setTimeout(() => { fired.current = true; onLong(); }, ms); };
+  const stop  = () => { clearTimeout(timer.current); };
+  const end   = () => { stop(); if (!fired.current) onShort?.(); };
+  return {
+    onMouseDown: start, onMouseUp: end, onMouseLeave: stop,
+    onTouchStart: start, onTouchEnd: end,
+    style: { WebkitUserSelect: 'none' as const, userSelect: 'none' as const },
+  };
+}
+
 // ─── Tiny display components ──────────────────────────────────
 function VisBar({vis}:{vis:number}) {
   const pct=Math.min(100,(vis/12)*100);
@@ -182,12 +196,13 @@ function CreationChip({c,onClick,glow,dim,sublabel}:{
 }
 
 // ─── Model chip ───────────────────────────────────────────────
-function ModelChip({m,onClick,glow,activating}:{m:ModelState;onClick?:()=>void;glow?:boolean;activating?:boolean}) {
+function ModelChip({m,onClick,onInspect,glow,activating}:{m:ModelState;onClick?:()=>void;onInspect?:()=>void;glow?:boolean;activating?:boolean}) {
   const card=getCardById(m.cardId);
   if(!card) return null;
   const used=m.activatedThisTurnBy!==null;
+  const lp = useLongPress(()=>onInspect?.(), onClick);
   return (
-    <div onClick={onClick} className={`flex flex-col gap-1 p-2 rounded-xl border cursor-pointer select-none transition-all
+    <div {...lp} className={`flex flex-col gap-1 p-2 rounded-xl border cursor-pointer select-none transition-all
       ${glow?'border-amber-400 bg-amber-400/10 scale-105':'border-[#cebefa]/20 bg-white/5 hover:border-[#cebefa]/40'}
       ${(used&&!activating)?'opacity-40':''}
       ${activating?'ring-2 ring-amber-400':''}
@@ -624,15 +639,6 @@ export default function ArenaBattlefield({onInGame,onExit}:Props) {
     setPa(null);
   }
 
-  // ── Drop zone handler ─────────────────────────────────────
-  function handleDrop(e:React.DragEvent){
-    e.preventDefault();
-    setDragOver(false);
-    const cardId=e.dataTransfer.getData('cardId');
-    if(!cardId||!gs||gs.currentPlayer!=='player') return;
-    initiateCard(cardId);
-  }
-
   // ── Card initiation from hand ─────────────────────────────
   function initiateCard(cardId:string){
     if(!gs||gs.currentPlayer!=='player') return;
@@ -887,7 +893,16 @@ export default function ArenaBattlefield({onInGame,onExit}:Props) {
         onAbility={n=>{triggerAbility(n);}} onClose={()=>setCreatorOpen(false)}/>}
 
       {/* ── Board ─────────────────────────────────────────── */}
-      <div className="flex flex-col gap-2 flex-1 overflow-y-auto p-2 max-w-[1280px] mx-auto w-full">
+      <div
+        className="flex flex-col gap-2 flex-1 overflow-y-auto p-2 max-w-[1280px] mx-auto w-full"
+        onDragOver={e=>{e.preventDefault();if(!dragOver)setDragOver(true);}}
+        onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setDragOver(false);}}
+        onDrop={e=>{
+          e.preventDefault();setDragOver(false);
+          const cid=e.dataTransfer.getData('cardId');
+          if(cid&&isPlayerTurn) initiateCard(cid);
+        }}
+      >
 
         {/* AI Zone */}
         <div className="bg-[#0d1211] border border-red-500/12 rounded-2xl p-3 shrink-0">
@@ -951,7 +966,7 @@ export default function ArenaBattlefield({onInGame,onExit}:Props) {
             {gs.sharedModels.length===0&&<span className="text-[8px] text-white/15">No models in play. Drag a model card to the drop zone below.</span>}
             {gs.sharedModels.map(m=><ModelChip key={m.instanceId} m={m} glow={modelGlow(m)}
               activating={pa?.kind==='activate'&&pa.modelId===m.instanceId}
-              onClick={()=>onModel(m)}/>)}
+              onClick={()=>onModel(m)} onInspect={()=>setDetail(m.cardId)}/>)}
           </div>
           {gs.artifacts.length>0&&<div className="flex gap-2 flex-wrap pt-2 border-t border-white/5 mt-2">
             {gs.artifacts.map(a=><div key={a.instanceId} onClick={()=>setDetail(a.cardId)}
@@ -996,6 +1011,21 @@ export default function ArenaBattlefield({onInGame,onExit}:Props) {
               </span>}
               <p className="text-[7px] text-white/20">Click to open abilities</p>
             </div>
+            {/* Favourite Prompt quick-reference */}
+            {(()=>{
+              const crd=getCardById(player.creatorId);
+              const fp=crd?.favouritePrompt;
+              if(!fp) return null;
+              return (
+                <div className="flex flex-col gap-1 p-2 rounded-xl border border-green-500/20 bg-green-500/5 shrink-0 cursor-help"
+                  title={fp.effect} style={{maxWidth:110}}>
+                  <p className="text-[7px] uppercase font-bold text-green-400/50">✦ Fav Prompt</p>
+                  <p className="text-[8px] font-bold text-white/70 leading-tight line-clamp-2">{fp.text}</p>
+                  <span className="text-[7px] bg-green-500/15 text-green-400 px-1 rounded self-start">{fp.subtype}</span>
+                  <p className="text-[7px] text-white/35 leading-tight">{fp.effect}</p>
+                </div>
+              );
+            })()}
             {/* Creations */}
             <div className="flex flex-col gap-2 flex-1">
               {(player.queue.length>0||player.remixQueue)&&<div>
@@ -1023,16 +1053,13 @@ export default function ArenaBattlefield({onInGame,onExit}:Props) {
           )}
         </div>
 
-        {/* ── Drop Zone + Action Banner ─────────────────────── */}
-        <div
-          onDragOver={e=>{e.preventDefault();setDragOver(true);}}
-          onDragLeave={()=>setDragOver(false)}
-          onDrop={handleDrop}
-          className={`rounded-2xl border-2 border-dashed transition-all p-3 flex flex-col gap-2 shrink-0
-            ${dragOver?'border-amber-400 bg-amber-400/8 scale-[1.01]':'border-white/8 bg-transparent'}
-          `}
-        >
-          {dragOver&&<p className="text-sm text-amber-400 font-bold text-center animate-pulse">⬇ Drop to play this card</p>}
+        {/* ── Drag indicator + Action Banner ───────────────── */}
+        <div className="flex flex-col gap-2 shrink-0">
+          {dragOver&&(
+            <div className="rounded-2xl border-2 border-dashed border-amber-400 bg-amber-400/8 py-3 text-sm text-amber-400 font-bold text-center animate-pulse">
+              ⬇ Release to play this card
+            </div>
+          )}
 
           {pa?.kind==='activate'&&(
             <div className="flex items-center gap-3 flex-wrap">
@@ -1083,7 +1110,7 @@ export default function ArenaBattlefield({onInGame,onExit}:Props) {
             </div>
           )}
 
-          {!pa&&!dragOver&&<p className="text-[8px] text-white/15 text-center">← Drag a card here to play it, or click a card to inspect it first</p>}
+          {!pa&&!dragOver&&<p className="text-[8px] text-white/15 text-center">← Drag any card over the board to play it, or click first to inspect</p>}
         </div>
 
         {/* ── Hand ─────────────────────────────────────────── */}

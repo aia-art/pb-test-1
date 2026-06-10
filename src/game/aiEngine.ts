@@ -88,12 +88,13 @@ function bestModelToActivate(
 
     if (p.credits < cost) continue;
 
-    // Pick prompts from hand (different subtypes)
-    const promptOptions = pickPrompts(s, model.cardId);
+    // Pick prompts — decide fav first so we don't exceed 2-prompt total
+    const willUseFav = canUseFavPrompt(s, model.cardId, []);
+    const maxRegular = willUseFav ? 1 : 2;          // fav counts as 1 of the 2 slots
+    const promptOptions = pickPrompts(s, model.cardId, maxRegular);
+    const useFav = willUseFav && canUseFavPrompt(s, model.cardId, promptOptions);
     const totalCost = cost + promptOptions.reduce((acc, pid) => acc + (getCardById(pid)?.cost ?? 0), 0);
     if (p.credits < totalCost) continue;
-
-    const useFav = canUseFavPrompt(s, model.cardId, promptOptions);
     const baseQuality = card.quality ?? 1;
     const score = baseQuality * 10 - totalCost + 5; // prefer activating over not
 
@@ -121,7 +122,7 @@ function canUseFavPrompt(s: GameState, modelCardId: string, usedPrompts: string[
   return false;
 }
 
-function pickPrompts(s: GameState, modelCardId: string): string[] {
+function pickPrompts(s: GameState, modelCardId: string, max = 2): string[] {
   const p = s.players[AI_ID];
   const modelCard = getCardById(modelCardId);
   if (!modelCard) return [];
@@ -162,7 +163,7 @@ function pickPrompts(s: GameState, modelCardId: string): string[] {
   }).sort((a, b) => b.score - a.score);
 
   for (const { id, subtype } of scored) {
-    if (picked.length >= 2) break;
+    if (picked.length >= max) break;
     if (usedSubtypes.has(subtype)) continue;
     picked.push(id);
     usedSubtypes.add(subtype);
