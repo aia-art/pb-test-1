@@ -87,6 +87,7 @@ export interface PlayerState {
   clipLockAppliedThisTurn: boolean;
   mulliganed: boolean;
   firstPostUsedThisTurn: boolean;
+  hasHadFirstTurn: boolean;
   // Daily challenge tracking
   repFromAbstractThisRound: number;
   repFromPortraitThisRound: number;

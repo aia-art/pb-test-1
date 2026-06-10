@@ -26,6 +26,7 @@ export default function App() {
   const [showSuggest,  setShowSuggest]  = useState(false);
 
   const { modal: annModal, openAnn, unread: annUnread } = useAnnouncements();
+  const [inGame, setInGame] = useState(false);
 
   // Keyboard shortcut: Escape closes modals
   useEffect(() => {
@@ -42,29 +43,29 @@ export default function App() {
     <div className="min-h-screen bg-[#0d1211] text-[#dfe3e1]">
       <GlossaryProvider />
 
-      <TopNavBar
+      {!inGame && <TopNavBar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onFeedback={() => setShowFeedback(true)}
         onAnnouncement={openAnn}
         annUnread={annUnread}
-      />
+      />}
 
       {/* Spacer for fixed nav */}
-      <div className="pt-16">
+      <div className={inGame ? "" : "pt-16"}>
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           {activeTab === 'home'  && <LandingHero onNavigate={setActiveTab} />}
           {activeTab === 'rules' && <RulesBrowser />}
           {activeTab === 'cards' && <CardGallery />}
           {activeTab === 'decks' && <DeckBuilder />}
-          {activeTab === 'play'  && <ArenaBattlefield />}
+          {activeTab === 'play'  && <ArenaBattlefield onInGame={setInGame} onExit={() => { setInGame(false); setActiveTab('home'); }} />}
         </main>
       </div>
 
       {/* Floating feedback FAB */}
       <button
         onClick={() => setShowFeedback(true)}
-        className="fixed bottom-6 right-6 z-30 flex items-center gap-2 px-5 py-3 bg-[#a1d0c6] text-[#033730] font-bold rounded-2xl shadow-2xl shadow-[#a1d0c6]/25 hover:brightness-110 active:scale-95 transition-all"
+        className={`fixed bottom-6 right-6 z-30 flex items-center gap-2 px-5 py-3 bg-[#a1d0c6] text-[#033730] font-bold rounded-2xl shadow-2xl shadow-[#a1d0c6]/25 hover:brightness-110 active:scale-95 transition-all ${inGame ? "hidden" : ""}`}
       >
         ✉ Feedback
       </button>

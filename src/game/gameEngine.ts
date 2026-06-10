@@ -3,6 +3,8 @@
 // Implements all rules v0.14 card effects
 // ============================================================
 import { getCardById, PREBUILT_DECKS } from '../data';
+import { getCardEffects } from '../cards';
+import type { H, CreationDraft, ActivationContext } from '../cards/_types';
 import type { DecksStore } from '../types';
 import type {
   GameState, PlayerState, CreationState, ModelState, ArtifactState,
@@ -19,6 +21,26 @@ export const MAX_QUEUE = 2;
 // ── ID generator ───────────────────────────────────────────────────
 let _seq = 0;
 export function uid(): string { return `${Date.now()}-${++_seq}`; }
+
+// ── Build CardHelpers object for card module injection ─────────
+export function buildHelpers(): import('../cards/_types').H {
+  return {
+    addLog,
+    applyLoyaltyDamage,
+    gainLoyalty: (s, pid, n) => {
+      const p = { ...s.players[pid], loyalty: s.players[pid].loyalty + n };
+      return { ...s, players: { ...s.players, [pid]: p } };
+    },
+    addGlitch,
+    addVisibility,
+    applyRep,
+    applyCredits,
+    drawCard,
+    destroyCreation,
+    findCreation,
+    effectiveStyle,
+  };
+}
 
 // ── Deck storage ───────────────────────────────────────────────────
 export function loadDeckStore(): DecksStore {
@@ -314,6 +336,7 @@ export function initGame(playerDeckId: string, aiDeckId: string): GameState {
       mods: { ban: null, trending: null, astronaut: null, proSub: null, astronautExpiredHalfRepThisTurn: false },
       creatorExhaustedThisTurn: false, clipLockAppliedThisTurn: false,
       mulliganed: false, firstPostUsedThisTurn: false,
+      hasHadFirstTurn: false,
       repFromAbstractThisRound: 0, repFromPortraitThisRound: 0,
     };
   }
@@ -369,36 +392,56 @@ function finishMulligan(s: GameState): GameState {
   const pMul = state.mulligan.player === 'yes';
   const aMul = state.mulligan.ai === 'yes';
 
-  // Random first player
+  // Decide first player randomly
   const firstPlayer: PlayerId = Math.random() < 0.5 ? 'player' : 'ai';
   const secondPlayer: PlayerId = firstPlayer === 'player' ? 'ai' : 'player';
 
-  // Starting credits: first player 4, second 6
-  const credits: Record<PlayerId, number> = { player: 0, ai: 0 };
-  credits[firstPlayer] = 4;
-  credits[secondPlayer] = 6;
+  // Base credits: 1st player 4, 2nd player 6
+  const credits: Record<PlayerId, number> = {
+    [firstPlayer]:  4,
+    [secondPlayer]: 6,
+  } as Record<PlayerId, number>;
 
-  // Mulligan bonus: if one mulliganed and other didn't, non-mulligan gets +2
-  if (pMul && !aMul) credits['ai'] = Math.min(10, credits['ai'] + 2);
+  // Mulligan bonus: ONLY if EXACTLY one player mulliganed.
+  // The player who did NOT mulligan receives +2 credits (one-time, non-stacking).
+  if (pMul && !aMul) credits['ai']     = Math.min(10, credits['ai']     + 2);
   if (aMul && !pMul) credits['player'] = Math.min(10, credits['player'] + 2);
+  // If both or neither mulligan, no bonus.
 
   // Apply starting bonuses from creator cards
-  let pp = { ...state.players.player, credits: credits.player };
-  let pa = { ...state.players.ai, credits: credits.ai };
+  let pp = { ...state.players.player, credits: credits['player'] };
+  let pa = { ...state.players.ai,     credits: credits['ai'] };
 
   const pCreator = getCardById(pp.creatorId);
   const aCreator = getCardById(pa.creatorId);
+
+  // Aia (C-001): +1 Credit regardless of position
+  // Anon (C-002): +1 Reputation
   if (pCreator?.startingBonus) {
-    if (pCreator.startingBonus.type === 'credit') pp.credits = Math.min(pp.creditCap, pp.credits + pCreator.startingBonus.amount);
-    else pp.reputation = Math.min(REP_CAP, pp.reputation + pCreator.startingBonus.amount);
+    if (pCreator.startingBonus.type === 'credit')
+      pp.credits = Math.min(pp.creditCap, pp.credits + pCreator.startingBonus.amount);
+    else
+      pp.reputation = Math.min(REP_CAP, pp.reputation + pCreator.startingBonus.amount);
   }
   if (aCreator?.startingBonus) {
-    if (aCreator.startingBonus.type === 'credit') pa.credits = Math.min(pa.creditCap, pa.credits + aCreator.startingBonus.amount);
-    else pa.reputation = Math.min(REP_CAP, pa.reputation + aCreator.startingBonus.amount);
+    if (aCreator.startingBonus.type === 'credit')
+      pa.credits = Math.min(pa.creditCap, pa.credits + aCreator.startingBonus.amount);
+    else
+      pa.reputation = Math.min(REP_CAP, pa.reputation + aCreator.startingBonus.amount);
   }
 
-  state = { ...state, players: { player: pp, ai: pa }, phase: 'playing', currentPlayer: firstPlayer, absTurn: 1, round: 1, turnPhase: 'refresh' };
-  state = addLog(state, `${firstPlayer === 'player' ? 'Player' : 'AI'} goes first! Round 1 begins.`, 'system');
+  state = {
+    ...state,
+    players: { player: pp, ai: pa },
+    phase: 'playing',
+    currentPlayer: firstPlayer,
+    absTurn: 1,
+    round: 1,
+    turnPhase: 'refresh',
+  };
+  state = addLog(state,
+    `${firstPlayer === 'player' ? 'Player' : 'AI'} goes first! ` +
+    `Credits — Player: ${pp.credits}, AI: ${pa.credits}. Round 1 begins.`, 'system');
   return state;
 }
 
@@ -597,6 +640,11 @@ export function runRefreshPhase(s: GameState): GameState {
     }
   }
 
+  // Mark that this player has now had their first turn
+  {
+    const pp = { ...state.players[pid], hasHadFirstTurn: true };
+    state = { ...state, players: { ...state.players, [pid]: pp } };
+  }
   state = { ...state, turnPhase: 'main' };
   return state;
 }
@@ -801,48 +849,29 @@ export function computeCreationOnActivation(
     bypassed = true;
   }
 
-  // Process prompts (max 2, different subtypes)
+  // Process prompts via card modules — each prompt lives in src/cards/prompts/P-XXX.ts
   for (const pid2 of promptIds) {
     const pc = getCardById(pid2);
     if (!pc) continue;
     usedPromptIds.push(pid2);
-
-    switch (pid2) {
-      case 'P-001': // Good Old Greg — Artist, assigns Fantasy
-        if (styleTag === 'Fantasy') quality += 1;
-        else styleTag = 'Fantasy';
-        if (modelCardId === 'M-004') vis += 1;
-        break;
-      case 'P-002': // Men... — Style, Portrait, +1 vis
-        styleTag = 'Portrait';
-        vis += 1;
-        break;
-      case 'P-003': // Copygazelle — Negative, 3-turn immunity
-        immuneUntilAbsTurn = state.absTurn + 3;
-        break;
-      case 'P-004': // Did You Steal This Prompt — Artist, +2 vis, +1 locked glitch
-        vis += 2; glitch += 1;
-        jbGlitchLockedUntil = state.absTurn + 2;
-        break;
-      case 'P-005': // Here Goes the Paragraph — Atmosphere, +2 glitch, +2 vis
-        glitch += 2; vis += 2;
-        break;
-      case 'P-006': // Are You Crazy?! — Style, +3 Quality, +1 Runtime
-        quality += 3; runtime += 1;
-        break;
-      case 'P-007': // What's Wrong with the Hands — Negative, +1 Quality
-        quality += 1;
-        break;
-      case 'P-008': // So That's How They Trained It — Negative, +1 Quality, watermark immune
-        quality += 1; watermarkImmune = true;
-        break;
-      case 'P-009': // Another Landscape — Style, assigns Landscape
-        styleTag = 'Landscape';
-        break;
-      case 'P-010': // What's That — Artist, +2 vis, +1 glitch
-        vis += 2; glitch += 1;
-        break;
-    }
+    const fx = getCardEffects(pid2);
+    if (!fx?.onActivation) continue;
+    const draft = {
+      quality, glitchTokens: glitch, visibilityCounters: vis, styleTag, runtime,
+      immuneUntilAbsTurn, jbGlitchLockedUntilAbsTurn: jbGlitchLockedUntil,
+      watermarkImmune, anonFavPromptVisBonusTurns,
+    };
+    const ctx = {
+      pid, modelCardId, otherPromptIds: promptIds.filter((x: string) => x !== pid2),
+      useFavPrompt, absTurn: state.absTurn, round: state.round, state,
+    };
+    const r = fx.onActivation(draft, ctx);
+    quality = r.quality; glitch = r.glitchTokens; vis = r.visibilityCounters;
+    styleTag = r.styleTag; runtime = r.runtime;
+    immuneUntilAbsTurn = r.immuneUntilAbsTurn;
+    jbGlitchLockedUntil = r.jbGlitchLockedUntilAbsTurn;
+    watermarkImmune = r.watermarkImmune;
+    anonFavPromptVisBonusTurns = r.anonFavPromptVisBonusTurns;
   }
 
   // Favourite prompt (treated as one of the 2 prompts)
@@ -962,11 +991,15 @@ export function activateModel(
   const model = state.sharedModels.find(m => m.instanceId === modelInstanceId);
   if (!model) return addLog(state, 'Model not found.', 'system');
 
-  // Activation rules: player who placed can activate turn they placed (round 1)
-  // From round 2 onwards, both players can activate
+  // Rule: on a player's very first turn they cannot activate the opponent's models.
+  // "First turn" = the first time that player's main phase runs (absTurn 1 for first
+  //  player, absTurn 2 for second player). After that, any player may activate any model.
   const isOwner = model.ownerId === pid;
-  if (!isOwner && state.round < 2) {
-    return addLog(state, 'Cannot activate opponent models in Round 1.', 'system');
+  if (!isOwner) {
+    const player = state.players[pid];
+    if (!player.hasHadFirstTurn) {
+      return addLog(state, 'Cannot activate opponent models on your first turn.', 'system');
+    }
   }
   if (model.activatedThisTurnBy !== null) {
     return addLog(state, 'This model was already activated this turn.', 'system');
@@ -1096,75 +1129,26 @@ export function playModifier(
   p.hand = hand;
   state = updPlayer(state, pid, p);
 
-  switch (cardId) {
-    case 'MO-001': { // The Astronaut — Universal Creator Modifier
-      // Target: friendly creator
-      const tp = targetId as PlayerId;
-      const target = { ...state.players[tp] };
-      target.loyalty = Math.min(target.loyalty + 3, 999); // Loyalty doesn't have a cap
-      target.mods = { ...target.mods, astronaut: { turnsRemaining: 3 } };
-      state = updPlayer(state, tp, target);
-      state = addLog(state, `Astronaut attached to ${tp}'s Creator. +3 Loyalty immediately.`, 'effect');
-      break;
-    }
-    case 'MO-002': case 'MO-003': case 'MO-004': { // LoRA — attach to model
-      const model = state.sharedModels.find(m => m.instanceId === targetId);
-      if (!model) { state = addLog(state, 'Model not found.', 'system'); break; }
-      if (model.loraCardId) { state = addLog(state, 'Model already has a LoRA.', 'system'); break; }
-      // Coherent variants can't have Anime LoRA
-      if (cardId === 'MO-002' && (model.cardId === 'M-001')) { state = addLog(state, 'Anime LoRA cannot be attached to Coherent variants.', 'system'); break; }
-      state = { ...state, sharedModels: state.sharedModels.map(m => m.instanceId === targetId ? { ...m, loraCardId: cardId } : m) };
-      state = addLog(state, `${card.name} LoRA attached to ${getCardById(model.cardId)?.name}.`, 'effect');
-      break;
-    }
-    case 'MO-005': { // Trending — creator modifier, 3 rounds
-      state = applyCreatorMod(state, targetId as PlayerId, 'trending', { roundsRemaining: 3 });
-      state = addLog(state, `Trending modifier applied to ${targetId}'s Creator.`, 'effect');
-      break;
-    }
-    case 'MO-006': { // Ban — creator modifier
-      const targetPid = targetId as PlayerId;
-      const oppCount = state.sharedModels.filter(m => m.ownerId !== pid).length;
-      const duration = Math.max(1, oppCount);
-      state = applyCreatorMod(state, targetPid, 'ban', { turnsRemaining: duration });
-      state = addLog(state, `Ban applied to ${targetPid}'s Creator for ${duration} turn(s).`, 'effect');
-      break;
-    }
-    case 'MO-007': { // PRO Subscription
-      const tp = targetId as PlayerId;
-      const target = { ...state.players[tp] };
-      target.creditCap = Math.min(CREDIT_CAP_MAX, target.creditCap + 3);
-      target.mods = { ...target.mods, proSub: { turnsRemaining: 3, halfCostUsedThisTurn: false } };
-      state = updPlayer(state, tp, target);
-      state = addLog(state, `PRO Subscription attached to ${tp}'s Creator. Credit cap +3, Runtimes -1.`, 'effect');
-      break;
-    }
-    case 'MO-008': { // Featured — attach to a creation with 6+ vis
-      const creation = findCreation(state, pid, targetId);
-      if (!creation) { state = addLog(state, 'Creation not found.', 'system'); break; }
-      if (creation.visibilityCounters < 6) { state = addLog(state, 'Featured requires 6+ Visibility.', 'system'); break; }
-      const pu = { ...state.players[pid] };
-      pu.activeCreations = pu.activeCreations.map(c =>
-        c.instanceId === targetId ? { ...c, featuredTurnsRemaining: 3 } : c
-      );
-      state = updPlayer(state, pid, pu);
-      state = addLog(state, `Featured modifier attached to a creation.`, 'effect');
-      break;
-    }
-    case 'MO-009': { // Queue Skip — attach to model
-      state = { ...state, sharedModels: state.sharedModels.map(m =>
-        m.instanceId === targetId ? { ...m, queueSkipReady: true } : m
-      )};
-      state = addLog(state, `Queue Skip attached to model.`, 'effect');
-      break;
-    }
-    case 'MO-010': { // Noise — attach to model
-      state = { ...state, sharedModels: state.sharedModels.map(m =>
-        m.instanceId === targetId ? { ...m, noiseTurnsRemaining: 5 } : m
-      )};
-      state = addLog(state, `Noise modifier attached to model. All future creations -1 Quality for 5 turns.`, 'effect');
-      break;
-    }
+  // Dispatch to card module — each modifier lives in src/cards/modifiers/MO-XXX.ts
+  const h = buildHelpers();
+  const fx = getCardEffects(cardId);
+
+  // LoRA modifiers: attach directly to model (simple model field update)
+  if (['MO-002','MO-003','MO-004'].includes(cardId) && targetType === 'model') {
+    const model = state.sharedModels.find(m => m.instanceId === targetId);
+    if (!model) return addLog(state, 'Model not found.', 'system');
+    if (model.loraCardId) return addLog(state, 'Model already has a LoRA.', 'system');
+    if (cardId === 'MO-002' && model.cardId === 'M-001')
+      return addLog(state, 'Anime LoRA cannot attach to Coherent variants.', 'system');
+    state = { ...state, sharedModels: state.sharedModels.map(m =>
+      m.instanceId === targetId ? { ...m, loraCardId: cardId } : m) };
+    return addLog(state, `${card.name} LoRA attached.`, 'effect');
+  }
+
+  if (fx?.onAttach) {
+    state = fx.onAttach(state, h, pid, targetId, targetType);
+  } else {
+    state = addLog(state, `${card.name} applied.`, 'effect');
   }
   return state;
 }
@@ -1190,50 +1174,11 @@ export function playArtifact(s: GameState, cardId: string, targetCreationId?: st
   state = updPlayer(state, pid, p);
   state = addLog(state, `${pid} plays Artifact: ${card.name}.`, 'action');
 
-  switch (cardId) {
-    case 'A-001': // Centaur Problem — 3 rounds
-      state = { ...state, centaurProblemRounds: 3 };
-      state = addLog(state, `Centaur Problem active! All Fantasy Creations take Glitch tokens.`, 'effect');
-      break;
-    case 'A-002': // Queue Timeout — 3 rounds, all Runtimes +1
-      state = { ...state, queueTimeoutRounds: 3 };
-      // Apply to existing queued creations
-      for (const p2id of ['player', 'ai'] as PlayerId[]) {
-        const p2 = { ...state.players[p2id] };
-        p2.queue = p2.queue.map(c => ({ ...c, runtime: c.runtime + 1 }));
-        state = updPlayer(state, p2id, p2);
-      }
-      state = addLog(state, `Queue Timeout active! All Runtimes +1.`, 'effect');
-      break;
-    case 'A-003': // Double Dragon Head — attach to Fantasy or Portrait creation
-      if (!targetCreationId) { state = addLog(state, 'Select a target creation.', 'system'); break; }
-      {
-        const targetPid: PlayerId = findCreationOwner(state, targetCreationId) ?? pid;
-        const tc = findCreation(state, targetPid, targetCreationId);
-        if (!tc) { state = addLog(state, 'Creation not found.', 'system'); break; }
-        const eStyle = effectiveStyle(tc.styleTag, state);
-        if (eStyle !== 'Fantasy' && eStyle !== 'Portrait') { state = addLog(state, 'Double Dragon Head only targets Fantasy or Portrait.', 'system'); break; }
-        const tp = { ...state.players[targetPid] };
-        tp.activeCreations = tp.activeCreations.map(c =>
-          c.instanceId === targetCreationId ? { ...c, dragonHeadTurnsRemaining: 3 } : c
-        );
-        state = updPlayer(state, targetPid, tp);
-      }
-      break;
-    case 'A-004': // Credit Drop — all players +3 credits
-      for (const p2id of ['player', 'ai'] as PlayerId[]) state = applyCredits(state, p2id, 3);
-      state = addLog(state, `Credit Drop! All players gain 3 Credits.`, 'effect');
-      break;
-    case 'A-005': // Server Overload — 3 rounds, cannot be removed
-      state = { ...state, serverOverloadRounds: 3 };
-      state = addLog(state, `Server Overload! All activations +1 Credit, Creations generate less Visibility.`, 'effect');
-      break;
-    case 'A-006': { // Algorithm Swap — requires 2 style tags from UI
-      const [s1, s2] = swapStyles ?? ['Fantasy', 'Portrait'];
-      state = { ...state, algorithmSwap: { style1: s1, style2: s2, expiresAbsTurn: state.absTurn + 2 } };
-      state = addLog(state, `Algorithm Swap! ${s1} ↔ ${s2} styles swapped until next turn.`, 'effect');
-      break;
-    }
+  // Dispatch to card module (src/cards/artifacts/A-XXX.ts)
+  const artH = buildHelpers();
+  const artFx = getCardEffects(cardId);
+  if (artFx?.onPlay) {
+    state = artFx.onPlay(state, artH, pid, targetCreationId, swapStyles);
   }
   return state;
 }
@@ -1264,90 +1209,18 @@ export function playEvent(s: GameState, cardId: string, targetId?: string): Game
   state = updPlayer(state, pid, p);
   state = addLog(state, `${pid} plays Event: ${card.name}.`, 'action');
 
-  const oppId: PlayerId = pid === 'player' ? 'ai' : 'player';
-
-  switch (cardId) {
-    case 'E-001': { // Mass Report — counters a modifier being played
-      // This is handled reactively; here we just cancel pending modifier
-      if (state.pendingModifierPlay) {
-        state = { ...state, pendingModifierPlay: null };
-        state = addLog(state, `Mass Report cancelled the modifier!`, 'effect');
-      }
-      break;
-    }
-    case 'E-002': { // Community Drama — opponent -2 Loyalty, draw 1 card
-      state = applyLoyaltyDamage(state, oppId, 2);
-      if (state.phase !== 'gameover') {
-        state = drawCard(state, oppId, 1);
-        state = addLog(state, `Community Drama! Opponent loses 2 Loyalty and draws 1 card.`, 'damage');
-      }
-      break;
-    }
-    case 'E-003': { // Prompt Theft — copy opponent's last prompt, activate own model
-      if (!state.lastOpponentActivation) { state = addLog(state, 'No opponent activation to copy.', 'system'); break; }
-      if (!targetId) { state = addLog(state, 'Select a model to activate.', 'system'); break; }
-      const model = state.sharedModels.find(m => m.instanceId === targetId);
-      if (!model) { state = addLog(state, 'Model not found.', 'system'); break; }
-      const copiedPrompts = state.lastOpponentActivation.promptIds.slice(0, 1); // copy one prompt
-      state = activateModel(state, targetId, copiedPrompts, false);
-      break;
-    }
-    case 'E-004': { // Priority Rendering — queued creation arrives next turn
-      const pu = { ...state.players[pid] };
-      const idx = pu.queue.findIndex(c => c.instanceId === targetId && !c.isInRemixQueue);
-      if (idx === -1) { state = addLog(state, 'Queued creation not found.', 'system'); break; }
-      pu.queue[idx] = { ...pu.queue[idx], runtime: 1 }; // arrives next refresh
-      state = updPlayer(state, pid, pu);
-      state = addLog(state, `Priority Rendering! Creation will arrive at the start of next turn.`, 'effect');
-      break;
-    }
-    case 'E-005': { // GPU Boost — reduce runtime of queued creation by 2
-      const pu = { ...state.players[pid] };
-      const idx = pu.queue.findIndex(c => c.instanceId === targetId && !c.isInRemixQueue);
-      if (idx === -1) { state = addLog(state, 'Queued creation not found.', 'system'); break; }
-      pu.queue[idx] = { ...pu.queue[idx], runtime: Math.max(1, pu.queue[idx].runtime - 2) };
-      state = updPlayer(state, pid, pu);
-      state = addLog(state, `GPU Boost! Queued creation runtime -2.`, 'effect');
-      break;
-    }
-    case 'E-006': { // Queue Crash — opponent queued creation runtime +2
-      const opp = { ...state.players[oppId] };
-      const inQueue = opp.queue.findIndex(c => c.instanceId === targetId);
-      if (inQueue !== -1) {
-        opp.queue[inQueue] = { ...opp.queue[inQueue], runtime: opp.queue[inQueue].runtime + 2 };
-        state = updPlayer(state, oppId, opp);
-      } else if (opp.remixQueue?.instanceId === targetId) {
-        opp.remixQueue = { ...opp.remixQueue, runtime: opp.remixQueue.runtime + 2 };
-        state = updPlayer(state, oppId, opp);
-      }
-      state = addLog(state, `Queue Crash! Opponent's creation delayed by 2 turns.`, 'effect');
-      break;
-    }
-    case 'E-007': { // Tip Received — requires PRO Sub, gain 4 credits
-      if (!state.players[pid].mods.proSub) { state = addLog(state, 'Tip Received requires PRO Subscription.', 'system'); break; }
-      state = applyCredits(state, pid, 4);
-      state = addLog(state, `Tip Received! Gained 4 Credits.`, 'effect');
-      break;
-    }
-    case 'E-008': { // Generation Cancelled — remove opponent queued creation
-      const opp = { ...state.players[oppId] };
-      const idx = opp.queue.findIndex(c => c.instanceId === targetId && !c.isInRemixQueue);
-      if (idx === -1) { state = addLog(state, 'Target not found in opponent queue.', 'system'); break; }
-      opp.queue.splice(idx, 1);
-      state = updPlayer(state, oppId, opp);
-      state = addLog(state, `Generation Cancelled! Opponent's queued creation was removed.`, 'effect');
-      break;
-    }
-    case 'E-009': { // Daily Challenge: Abstractions — this round
-      state = { ...state, dailyChallengeAbstracts: { round: state.round } };
-      state = addLog(state, `Daily Challenge: Abstractions! Abstract Creations generate double Rep this round.`, 'effect');
-      break;
-    }
-    case 'E-010': { // Daily Challenge: Portraits — this round
-      state = { ...state, dailyChallengePortraits: { round: state.round } };
-      state = addLog(state, `Daily Challenge: Portraits! Portrait Creations generate double Rep this round.`, 'effect');
-      break;
-    }
+  const evtH = buildHelpers();
+  const evtFx = getCardEffects(cardId);
+  if (evtFx?.onEvent) {
+    state = evtFx.onEvent(state, evtH, pid, targetId);
+  } else if (cardId === 'E-003') {
+    // Prompt Theft: activate own model copying opponent's last prompt
+    if (!state.lastOpponentActivation) return addLog(state, 'No opponent activation to copy.', 'system');
+    if (!targetId) return addLog(state, 'Select a model to activate.', 'system');
+    const model = state.sharedModels.find(m => m.instanceId === targetId);
+    if (!model) return addLog(state, 'Model not found.', 'system');
+    const copiedPrompts = state.lastOpponentActivation.promptIds.slice(0, 1);
+    state = activateModel(state, targetId, copiedPrompts, false);
   }
   return state;
 }
